@@ -367,83 +367,43 @@ Generate a complete customer profile with realistic data (use fictional informat
         return pdf_path
 
     def _save_to_volume(self, local_path, filename):
-        """Save file to Databricks volume."""
+        """Save file to Databricks volume using dbutils.fs.cp."""
+        
+        # Target Databricks volume path
+        target_volume_path = f"{self.volume_path}/{filename}"
+        
         try:
-            import shutil
+            # Use dbutils.fs.cp with the exact pattern you provided
+            # Note: using 'file:' prefix (not 'file://') as specified
+            local_file_uri = f"file:{local_path}"
             
-            # Check if we're in a Databricks environment
-            try:
-                # Try to use dbutils for Databricks volume access
-                from pyspark.sql import SparkSession
-                spark = SparkSession.getActiveSession()
-                if spark is not None:
-                    # We're in Databricks, use dbutils
-                    try:
-                        dbutils = spark.sparkContext._jvm.com.databricks.dbutils_v1.DBUtilsHolder.dbutils()
-                        volume_file_path = f"{self.volume_path}/{filename}"
-                        
-                        # Copy file to volume
-                        dbutils.fs().cp(f"file://{local_path}", volume_file_path)
-                        print(f"Successfully saved {filename} to {volume_file_path}")
-                        return True
-                    except Exception as e:
-                        print(f"Failed to use dbutils, falling back to direct copy: {str(e)}")
-                        # Fall through to direct copy method
-            except ImportError:
-                # Not in Databricks environment
-                pass
+            print(f"Copying {local_path} to {target_volume_path}")
+            dbutils.fs.cp(local_file_uri, target_volume_path)
             
-            # Alternative: Direct file system copy (if volume is mounted)
-            try:
-                # Create volume directory if it doesn't exist
-                volume_dir = self.volume_path
-                if not os.path.exists(volume_dir):
-                    os.makedirs(volume_dir, exist_ok=True)
-                
-                volume_file_path = os.path.join(volume_dir, filename)
-                shutil.copy2(local_path, volume_file_path)
-                print(f"Successfully copied {filename} to {volume_file_path}")
+            # Optional: verify the copy
+            print(f"Verifying copy...")
+            volume_files = dbutils.fs.ls(self.volume_path)
+            
+            # Check if file exists in volume
+            copied_file = None
+            for file_info in volume_files:
+                if file_info.name == filename:
+                    copied_file = file_info
+                    break
+            
+            if copied_file:
+                print(f"✅ SUCCESS: {filename} copied to volume ({copied_file.size} bytes)")
                 return True
+            else:
+                print(f"❌ VERIFICATION FAILED: {filename} not found in volume after copy")
+                return False
                 
-            except Exception as e:
-                print(f"Failed to copy to volume directory: {str(e)}")
-                # Fall back to alternative approaches
-                
-                # Try using Databricks SDK
-                try:
-                    from databricks.sdk import WorkspaceClient
-                    from databricks.sdk.service.files import UploadRequest
-                    
-                    w = WorkspaceClient()
-                    
-                    # Read the local file
-                    with open(local_path, 'rb') as f:
-                        file_content = f.read()
-                    
-                    # Upload to volume
-                    volume_file_path = f"{self.volume_path}/{filename}"
-                    w.files.upload(
-                        file_path=volume_file_path,
-                        contents=file_content,
-                        overwrite=True
-                    )
-                    print(f"Successfully uploaded {filename} to {volume_file_path} via Databricks SDK")
-                    return True
-                    
-                except Exception as sdk_error:
-                    print(f"Databricks SDK upload failed: {str(sdk_error)}")
-                    
-                    # Final fallback: at least confirm local file exists
-                    if os.path.exists(local_path):
-                        print(f"File created locally at {local_path}")
-                        print(f"Manual copy needed to: {self.volume_path}/{filename}")
-                        return True
-                    else:
-                        print(f"Error: Local file not found at {local_path}")
-                        return False
-                        
+        except NameError:
+            print("❌ ERROR: dbutils not available - not in Databricks environment")
+            print("Make sure you're running this in a Databricks notebook or environment with dbutils")
+            return False
         except Exception as e:
-            print(f"Error in _save_to_volume: {str(e)}")
+            print(f"❌ ERROR: dbutils.fs.cp failed - {str(e)}")
             return False
 
     def _format_doc_type(self, doc_type):
