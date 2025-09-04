@@ -95,11 +95,11 @@ else:
             ], width=12)
         ]),
         
-        # Iterative Generation Section
+        # Operation Builder Section
         dbc.Row([
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader(html.H4("Generate Synthetic Data", className="mb-0")),
+                    dbc.CardHeader(html.H4("Add Data Generation Operations", className="mb-0")),
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col([
@@ -111,32 +111,46 @@ else:
                                         {'label': 'Generate Text', 'value': 'text'},
                                         {'label': 'Generate Tabular Data', 'value': 'tabular'}
                                     ],
-                                    value='pdf',
+                                    placeholder="Select data type to add...",
                                     className="mb-3"
                                 )
-                            ], width=4),
-                            dbc.Col([
-                                html.Label("Description:", className="form-label fw-bold"),
-                                dbc.Input(
-                                    id='generation-description',
-                                    placeholder="Describe what you want to generate...",
-                                    className="mb-3"
-                                )
-                            ], width=6),
+                            ], width=8),
                             dbc.Col([
                                 html.Label("Action:", className="form-label fw-bold"),
                                 dbc.Button(
-                                    "Generate",
-                                    id="iterative-generate-button",
-                                    color="success",
+                                    "Add Operation",
+                                    id="add-operation-button",
+                                    color="primary",
                                     size="lg",
-                                    className="w-100"
+                                    className="w-100",
+                                    disabled=True
                                 )
-                            ], width=2)
+                            ], width=4)
                         ])
                     ])
                 ], className="mb-4")
             ], width=12)
+        ]),
+        
+        # Operations List Section
+        dbc.Row([
+            dbc.Col([
+                html.Div(id="operations-container", className="mb-4"),
+            ], width=12)
+        ]),
+        
+        # Generate Button Section
+        dbc.Row([
+            dbc.Col([
+                dbc.Button(
+                    "Generate All Operations",
+                    id="generate-all-button",
+                    color="success",
+                    size="lg",
+                    className="w-100 mb-4",
+                    disabled=True
+                )
+            ], width={'size': 6, 'offset': 3})
         ]),
         
         # Generation History and Status
@@ -147,6 +161,7 @@ else:
                 dcc.Store(id="generation-store"),
                 dcc.Store(id="progress-store"),
                 dcc.Store(id="history-store", data=[]),
+                dcc.Store(id="operations-store", data=[]),
                 dcc.Interval(
                     id="progress-interval",
                     interval=500,  # Update every 500ms

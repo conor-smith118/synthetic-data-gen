@@ -34,96 +34,165 @@ class SyntheticDataGenerator:
         self._add_custom_css()
 
     def _create_callbacks(self):
-        # Start iterative generation callback
+        # Enable/disable add operation button based on data type selection
+        @self.app.callback(
+            Output('add-operation-button', 'disabled'),
+            Input('data-type-selector', 'value'),
+            prevent_initial_call=True
+        )
+        def enable_add_operation(data_type):
+            return data_type is None
+        
+        # Add operation callback
+        @self.app.callback(
+            Output('operations-store', 'data'),
+            Output('data-type-selector', 'value'),
+            Input('add-operation-button', 'n_clicks'),
+            State('data-type-selector', 'value'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def add_operation(n_clicks, data_type, operations):
+            if not n_clicks or not data_type:
+                return dash.no_update, dash.no_update
+            
+            operations = operations or []
+            
+            # Create new operation with unique ID
+            operation_id = f"op_{len(operations)}_{int(time.time())}"
+            new_operation = {
+                'id': operation_id,
+                'type': data_type,
+                'configured': False,
+                'config': {}
+            }
+            
+            operations.append(new_operation)
+            
+            # Clear the selector
+            return operations, None
+        
+        # Display operations callback
+        @self.app.callback(
+            Output('operations-container', 'children'),
+            Output('generate-all-button', 'disabled'),
+            Input('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def display_operations(operations):
+            if not operations:
+                return [], True
+            
+            operation_cards = []
+            configured_count = 0
+            
+            for op in operations:
+                card = self._create_operation_card(op)
+                operation_cards.append(card)
+                if op.get('configured', False):
+                    configured_count += 1
+            
+            # Enable generate button if at least one operation is configured
+            generate_disabled = configured_count == 0
+            
+            return operation_cards, generate_disabled
+
+        # Start batch generation callback
         @self.app.callback(
             Output('progress-interval', 'disabled'),
             Output('progress-store', 'data'),
-            Output('iterative-generate-button', 'disabled'),
-            Input('iterative-generate-button', 'n_clicks'),
-            State('data-type-selector', 'value'),
-            State('generation-description', 'value'),
+            Output('generate-all-button', 'disabled', allow_duplicate=True),
+            Input('generate-all-button', 'n_clicks'),
+            State('operations-store', 'data'),
             State('company-name', 'value'),
             State('company-sector', 'value'),
             prevent_initial_call=True
         )
-        def start_iterative_generation(n_clicks, data_type, description, company_name, company_sector):
-            if not n_clicks or not description:
+        def start_batch_generation(n_clicks, operations, company_name, company_sector):
+            if not n_clicks or not operations:
+                return dash.no_update, dash.no_update, dash.no_update
+            
+            # Filter only configured operations
+            configured_ops = [op for op in operations if op.get('configured', False)]
+            if not configured_ops:
                 return dash.no_update, dash.no_update, dash.no_update
             
             # Reset and start generation state
             self.generation_state = {
                 'active': True,
-                'current_item': 0,
-                'total_items': 1,  # Single item for iterative generation
-                'current_step': 'Initializing...',
+                'current_operation': 0,
+                'total_operations': len(configured_ops),
+                'current_step': 'Initializing batch...',
                 'completed_items': [],
                 'error': None,
                 'start_time': time.time(),
-                'data_type': data_type,
-                'description': description,
+                'operations': configured_ops,
                 'company_name': company_name or 'Acme Solutions Inc.',
                 'company_sector': company_sector or 'technology'
             }
             
             # Start generation in background thread
             threading.Thread(
-                target=self._generate_data_background, 
-                args=(data_type, description, company_name, company_sector),
+                target=self._generate_batch_background, 
+                args=(configured_ops, company_name, company_sector),
                 daemon=True
             ).start()
             
             # Enable interval and disable button
             return False, {'status': 'started'}, True
-
+        
         # Progress update callback
         @self.app.callback(
             Output('current-generation-status', 'children'),
             Output('progress-interval', 'disabled', allow_duplicate=True),
-            Output('iterative-generate-button', 'disabled', allow_duplicate=True),
+            Output('generate-all-button', 'disabled', allow_duplicate=True),
             Output('generation-store', 'data'),
             Input('progress-interval', 'n_intervals'),
             prevent_initial_call=True
         )
         def update_progress(n_intervals):
-            if not self.generation_state['active'] and self.generation_state.get('current_item', 0) == 0:
+            if not self.generation_state.get('active', False) and self.generation_state.get('current_operation', 0) == 0:
                 return dash.no_update, dash.no_update, dash.no_update, dash.no_update
             
             # Calculate progress
             progress_percent = 0
-            if self.generation_state.get('total_items', 0) > 0:
-                progress_percent = (self.generation_state.get('current_item', 0) / self.generation_state.get('total_items', 1)) * 100
+            if self.generation_state.get('total_operations', 0) > 0:
+                progress_percent = (self.generation_state.get('current_operation', 0) / self.generation_state.get('total_operations', 1)) * 100
             
             # Check if generation is complete
-            if not self.generation_state['active']:
-                if self.generation_state['error']:
+            if not self.generation_state.get('active', False):
+                if self.generation_state.get('error'):
                     # Error state
                     error_message = dbc.Alert([
-                        html.H5("❌ Generation Failed", className="mb-2"),
+                        html.H5("❌ Batch Generation Failed", className="mb-2"),
                         html.P(f"Error: {self.generation_state['error']}")
                     ], color="danger")
                     return error_message, True, False, {'status': 'error', 'error': self.generation_state['error']}
                 else:
-                    # Success state - item completed
+                    # Success state - batch completed
                     elapsed_time = time.time() - self.generation_state['start_time']
-                    data_type = self.generation_state.get('data_type', 'item')
+                    total_items = len(self.generation_state.get('completed_items', []))
                     
                     success_message = dbc.Alert([
-                        html.H5("✅ Generation Complete!", className="mb-2"),
-                        html.P(f"Successfully generated {self._format_data_type(data_type)} in {elapsed_time:.1f} seconds"),
-                        html.P("Ready to generate more data - adjust settings above and click Generate again!", className="mb-0 text-muted")
+                        html.H5("✅ Batch Generation Complete!", className="mb-2"),
+                        html.P(f"Successfully generated {total_items} item(s) from {self.generation_state.get('total_operations', 0)} operation(s) in {elapsed_time:.1f} seconds"),
+                        html.P("You can add more operations above or generate the current batch again!", className="mb-0 text-muted")
                     ], color="success")
                     
                     return success_message, True, False, {'status': 'complete', 'items': self.generation_state.get('completed_items', [])}
             
             # Active generation state
-            data_type = self.generation_state.get('data_type', 'item')
+            current_op = self.generation_state.get('current_operation', 0)
+            total_ops = self.generation_state.get('total_operations', 1)
+            
             status_message = dbc.Alert([
                 html.Div([
                     html.Div([
                         html.I(className="fas fa-spinner fa-spin me-2"),
-                        html.H5(f"🔄 Generating {self._format_data_type(data_type)}...", className="d-inline mb-0")
+                        html.H5(f"🔄 Processing Batch Operations...", className="d-inline mb-0")
                     ], className="d-flex align-items-center mb-3"),
                     
+                    html.P(f"Operation {current_op} of {total_ops}", className="mb-2"),
                     html.P(f"Current step: {self.generation_state.get('current_step', 'Processing...')}", className="mb-3 text-muted"),
                     
                     dbc.Progress(
@@ -190,6 +259,326 @@ class SyntheticDataGenerator:
                 history_display = []
             
             return history_display, history_data
+        
+        # Dynamic callback for operation configuration updates
+        @self.app.callback(
+            Output('operations-store', 'data', allow_duplicate=True),
+            [Input({'type': 'pdf-description', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'pdf-doc-type', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'pdf-count', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'text-description', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'text-type', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'text-words', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'tabular-description', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'tabular-type', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'tabular-rows', 'index': dash.dependencies.ALL}, 'value')],
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def update_operation_configs(*args):
+            operations = args[-1]  # Last argument is the operations state
+            if not operations:
+                return dash.no_update
+            
+            ctx = callback_context
+            if not ctx.triggered:
+                return dash.no_update
+            
+            # Parse the triggered input
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            if triggered_id == '':
+                return dash.no_update
+            
+            try:
+                import json
+                triggered_comp = json.loads(triggered_id)
+                op_id = triggered_comp['index']
+                comp_type = triggered_comp['type']
+                new_value = ctx.triggered[0]['value']
+                
+                # Find and update the operation
+                for op in operations:
+                    if op['id'] == op_id:
+                        if 'config' not in op:
+                            op['config'] = {}
+                        
+                        # Update the specific config value
+                        if comp_type == 'pdf-description':
+                            op['config']['description'] = new_value
+                        elif comp_type == 'pdf-doc-type':
+                            op['config']['doc_type'] = new_value
+                        elif comp_type == 'pdf-count':
+                            op['config']['count'] = new_value
+                        elif comp_type == 'text-description':
+                            op['config']['description'] = new_value
+                        elif comp_type == 'text-type':
+                            op['config']['text_type'] = new_value
+                        elif comp_type == 'text-words':
+                            op['config']['word_count'] = new_value
+                        elif comp_type == 'tabular-description':
+                            op['config']['description'] = new_value
+                        elif comp_type == 'tabular-type':
+                            op['config']['data_type'] = new_value
+                        elif comp_type == 'tabular-rows':
+                            op['config']['row_count'] = new_value
+                        
+                        # Mark as configured if description is provided
+                        description = op['config'].get('description', '')
+                        op['configured'] = bool(description and description.strip())
+                        break
+                
+                return operations
+                
+            except Exception as e:
+                print(f"Error updating operation config: {str(e)}")
+                return dash.no_update
+        
+        # Remove operation callback
+        @self.app.callback(
+            Output('operations-store', 'data', allow_duplicate=True),
+            Input({'type': 'remove-op', 'index': dash.dependencies.ALL}, 'n_clicks'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def remove_operation(n_clicks_list, operations):
+            if not operations or not any(n_clicks_list):
+                return dash.no_update
+            
+            ctx = callback_context
+            if not ctx.triggered:
+                return dash.no_update
+            
+            # Find which remove button was clicked
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            if triggered_id == '':
+                return dash.no_update
+            
+            try:
+                import json
+                triggered_comp = json.loads(triggered_id)
+                op_id_to_remove = triggered_comp['index']
+                
+                # Remove the operation with matching ID
+                operations = [op for op in operations if op['id'] != op_id_to_remove]
+                
+                return operations
+                
+            except Exception as e:
+                print(f"Error removing operation: {str(e)}")
+                return dash.no_update
+
+    def _create_operation_card(self, operation):
+        """Create a card for configuring an operation."""
+        op_id = operation['id']
+        op_type = operation['type']
+        configured = operation.get('configured', False)
+        config = operation.get('config', {})
+        
+        # Create operation-specific configuration inputs
+        if op_type == 'pdf':
+            config_inputs = [
+                html.Label("Document Type:", className="form-label fw-bold"),
+                dcc.Dropdown(
+                    id={'type': 'pdf-doc-type', 'index': op_id},
+                    options=[
+                        {'label': 'Policy Guide', 'value': 'policy_guide'},
+                        {'label': 'Customer Correspondence', 'value': 'customer_correspondence'},
+                        {'label': 'Customer Profile', 'value': 'customer_profile'}
+                    ],
+                    value=config.get('doc_type', 'policy_guide'),
+                    className="mb-3"
+                ),
+                html.Label("Description:", className="form-label fw-bold"),
+                dbc.Textarea(
+                    id={'type': 'pdf-description', 'index': op_id},
+                    placeholder="Describe the PDF document you want to generate...",
+                    value=config.get('description', ''),
+                    rows=3,
+                    className="mb-3"
+                ),
+                html.Label("Number of Documents:", className="form-label fw-bold"),
+                dcc.Slider(
+                    id={'type': 'pdf-count', 'index': op_id},
+                    min=1,
+                    max=10,
+                    step=1,
+                    value=config.get('count', 1),
+                    marks={i: str(i) for i in range(1, 11)},
+                    className="mb-3"
+                )
+            ]
+        elif op_type == 'text':
+            config_inputs = [
+                html.Label("Text Type:", className="form-label fw-bold"),
+                dcc.Dropdown(
+                    id={'type': 'text-type', 'index': op_id},
+                    options=[
+                        {'label': 'Marketing Copy', 'value': 'marketing'},
+                        {'label': 'Product Description', 'value': 'product'},
+                        {'label': 'Email Template', 'value': 'email'},
+                        {'label': 'Blog Post', 'value': 'blog'}
+                    ],
+                    value=config.get('text_type', 'marketing'),
+                    className="mb-3"
+                ),
+                html.Label("Description:", className="form-label fw-bold"),
+                dbc.Textarea(
+                    id={'type': 'text-description', 'index': op_id},
+                    placeholder="Describe the text content you want to generate...",
+                    value=config.get('description', ''),
+                    rows=3,
+                    className="mb-3"
+                ),
+                html.Label("Word Count Target:", className="form-label fw-bold"),
+                dcc.Slider(
+                    id={'type': 'text-words', 'index': op_id},
+                    min=100,
+                    max=2000,
+                    step=100,
+                    value=config.get('word_count', 500),
+                    marks={i: f"{i}w" for i in range(100, 2001, 500)},
+                    className="mb-3"
+                )
+            ]
+        elif op_type == 'tabular':
+            config_inputs = [
+                html.Label("Data Type:", className="form-label fw-bold"),
+                dcc.Dropdown(
+                    id={'type': 'tabular-type', 'index': op_id},
+                    options=[
+                        {'label': 'Customer Data', 'value': 'customers'},
+                        {'label': 'Sales Data', 'value': 'sales'},
+                        {'label': 'Product Data', 'value': 'products'},
+                        {'label': 'Employee Data', 'value': 'employees'}
+                    ],
+                    value=config.get('data_type', 'customers'),
+                    className="mb-3"
+                ),
+                html.Label("Description:", className="form-label fw-bold"),
+                dbc.Textarea(
+                    id={'type': 'tabular-description', 'index': op_id},
+                    placeholder="Describe the tabular data you want to generate...",
+                    value=config.get('description', ''),
+                    rows=3,
+                    className="mb-3"
+                ),
+                html.Label("Number of Rows:", className="form-label fw-bold"),
+                dcc.Slider(
+                    id={'type': 'tabular-rows', 'index': op_id},
+                    min=10,
+                    max=1000,
+                    step=10,
+                    value=config.get('row_count', 100),
+                    marks={i: str(i) for i in range(10, 1001, 200)},
+                    className="mb-3"
+                )
+            ]
+        else:
+            config_inputs = [html.P("Unknown operation type")]
+        
+        # Status indicator
+        if configured:
+            status_color = "success"
+            status_icon = "✅"
+            status_text = "Configured"
+        else:
+            status_color = "warning"
+            status_icon = "⚠️"
+            status_text = "Needs Configuration"
+        
+        return dbc.Card([
+            dbc.CardHeader([
+                html.Div([
+                    html.H5(f"{self._format_data_type(op_type)}", className="mb-0"),
+                    html.Div([
+                        dbc.Badge(f"{status_icon} {status_text}", color=status_color, className="me-2"),
+                        dbc.Button("Remove", id={'type': 'remove-op', 'index': op_id}, color="danger", size="sm")
+                    ])
+                ], className="d-flex justify-content-between align-items-center")
+            ]),
+            dbc.CardBody(config_inputs)
+        ], className="mb-3")
+
+    def _generate_batch_background(self, operations, company_name, company_sector):
+        """Generate multiple operations in background thread."""
+        try:
+            for i, operation in enumerate(operations):
+                # Update progress
+                self.generation_state['current_operation'] = i + 1
+                op_type = operation['type']
+                self.generation_state['current_step'] = f"Processing {self._format_data_type(op_type)} operation..."
+                
+                # Generate based on operation type and configuration
+                if op_type == 'pdf':
+                    items = self._process_pdf_operation(operation, company_name, company_sector)
+                elif op_type == 'text':
+                    items = self._process_text_operation(operation, company_name, company_sector)
+                elif op_type == 'tabular':
+                    items = self._process_tabular_operation(operation, company_name, company_sector)
+                else:
+                    print(f"Unknown operation type: {op_type}")
+                    continue
+                
+                # Add items to completed list
+                if isinstance(items, list):
+                    self.generation_state['completed_items'].extend(items)
+                else:
+                    self.generation_state['completed_items'].append(items)
+                
+                # Small delay between operations
+                if i < len(operations) - 1:
+                    self.generation_state['current_step'] = f"Preparing next operation..."
+                    time.sleep(0.5)
+            
+            # Mark as complete
+            self.generation_state['active'] = False
+            self.generation_state['current_step'] = 'Batch complete!'
+            
+        except Exception as e:
+            print(f"Error in batch generation: {str(e)}")
+            self.generation_state['active'] = False
+            self.generation_state['error'] = str(e)
+
+    def _process_pdf_operation(self, operation, company_name, company_sector):
+        """Process a PDF generation operation."""
+        config = operation.get('config', {})
+        doc_type = config.get('doc_type', 'policy_guide')
+        description = config.get('description', 'Sample document')
+        count = config.get('count', 1)
+        
+        items = []
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        for i in range(count):
+            enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
+            item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}")
+            items.append(item)
+        
+        return items
+
+    def _process_text_operation(self, operation, company_name, company_sector):
+        """Process a text generation operation (placeholder)."""
+        config = operation.get('config', {})
+        text_type = config.get('text_type', 'marketing')
+        description = config.get('description', 'Sample text')
+        word_count = config.get('word_count', 500)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        enhanced_description = f"For {company_name} (a {company_sector} company): {description} (target: {word_count} words)"
+        
+        return self._generate_text_item(enhanced_description, company_name, company_sector, timestamp)
+
+    def _process_tabular_operation(self, operation, company_name, company_sector):
+        """Process a tabular data generation operation (placeholder)."""
+        config = operation.get('config', {})
+        data_type = config.get('data_type', 'customers')
+        description = config.get('description', 'Sample data')
+        row_count = config.get('row_count', 100)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        enhanced_description = f"For {company_name} (a {company_sector} company): {description} ({row_count} rows)"
+        
+        return self._generate_tabular_item(enhanced_description, company_name, company_sector, timestamp)
 
     def _generate_documents_background(self, doc_type, description, count):
         """Generate documents in background thread with progress updates."""
