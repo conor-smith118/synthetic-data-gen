@@ -367,43 +367,35 @@ Generate a complete customer profile with realistic data (use fictional informat
         return pdf_path
 
     def _save_to_volume(self, local_path, filename):
-        """Save file to Databricks volume using dbutils.fs.cp."""
+        """Save file to Databricks volume using direct file operations."""
+        import shutil
+        import os
         
-        # Target Databricks volume path
-        target_volume_path = f"{self.volume_path}/{filename}"
+        # Target volume path
+        volume_file_path = f"{self.volume_path}/{filename}"
         
         try:
-            # Use dbutils.fs.cp with the exact pattern you provided
-            # Note: using 'file:' prefix (not 'file://') as specified
-            local_file_uri = f"file:{local_path}"
+            # Ensure the volume directory exists
+            volume_dir = os.path.dirname(volume_file_path)
+            os.makedirs(volume_dir, exist_ok=True)
             
-            print(f"Copying {local_path} to {target_volume_path}")
-            dbutils.fs.cp(local_file_uri, target_volume_path)
+            # Direct file copy to volume - this works when volumes are properly mounted
+            print(f"Copying {local_path} to {volume_file_path}")
+            shutil.copy2(local_path, volume_file_path)
             
-            # Optional: verify the copy
-            print(f"Verifying copy...")
-            volume_files = dbutils.fs.ls(self.volume_path)
-            
-            # Check if file exists in volume
-            copied_file = None
-            for file_info in volume_files:
-                if file_info.name == filename:
-                    copied_file = file_info
-                    break
-            
-            if copied_file:
-                print(f"✅ SUCCESS: {filename} copied to volume ({copied_file.size} bytes)")
+            # Verify the copy worked
+            if os.path.exists(volume_file_path):
+                file_size = os.path.getsize(volume_file_path)
+                print(f"✅ SUCCESS: {filename} copied to volume ({file_size:,} bytes)")
                 return True
             else:
-                print(f"❌ VERIFICATION FAILED: {filename} not found in volume after copy")
+                print(f"❌ FAILED: File not found at {volume_file_path} after copy")
                 return False
                 
-        except NameError:
-            print("❌ ERROR: dbutils not available - not in Databricks environment")
-            print("Make sure you're running this in a Databricks notebook or environment with dbutils")
-            return False
         except Exception as e:
-            print(f"❌ ERROR: dbutils.fs.cp failed - {str(e)}")
+            print(f"❌ ERROR: Failed to copy {filename} to volume - {str(e)}")
+            print(f"   Source: {local_path}")
+            print(f"   Target: {volume_file_path}")
             return False
 
     def _format_doc_type(self, doc_type):
