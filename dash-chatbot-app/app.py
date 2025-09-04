@@ -106,7 +106,14 @@ else:
                         
                         # Progress and Status
                         html.Div(id="generation-status", className="mb-3"),
-                        dcc.Store(id="generation-store")
+                        dcc.Store(id="generation-store"),
+                        dcc.Store(id="progress-store"),
+                        dcc.Interval(
+                            id="progress-interval",
+                            interval=500,  # Update every 500ms
+                            n_intervals=0,
+                            disabled=True
+                        )
                     ])
                 ])
             ], width={'size': 8, 'offset': 2})

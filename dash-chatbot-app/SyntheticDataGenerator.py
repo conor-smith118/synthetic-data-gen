@@ -1,5 +1,5 @@
 import dash
-from dash import html, Input, Output, State, dcc
+from dash import html, Input, Output, State, dcc, callback_context
 import dash_bootstrap_components as dbc
 from model_serving_utils import query_endpoint
 import json
@@ -11,89 +11,181 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from databricks.sdk import WorkspaceClient
+import threading
 
 class SyntheticDataGenerator:
     def __init__(self, app, endpoint_name):
         self.app = app
         self.endpoint_name = endpoint_name
         self.volume_path = "/Volumes/conor_smith/synthetic_data_app/synthetic_data_volume"
+        
+        # Progress tracking
+        self.generation_state = {
+            'active': False,
+            'current_doc': 0,
+            'total_docs': 0,
+            'current_step': '',
+            'completed_files': [],
+            'error': None,
+            'start_time': None
+        }
+        
         self._create_callbacks()
+        self._add_custom_css()
 
     def _create_callbacks(self):
+        # Start generation callback
         @self.app.callback(
-            Output('generation-status', 'children'),
-            Output('generation-store', 'data'),
+            Output('progress-interval', 'disabled'),
+            Output('progress-store', 'data'),
+            Output('generate-button', 'disabled'),
             Input('generate-button', 'n_clicks'),
             State('document-type-dropdown', 'value'),
             State('document-description', 'value'),
             State('document-count-slider', 'value'),
             prevent_initial_call=True
         )
-        def generate_documents(n_clicks, doc_type, description, count):
+        def start_generation(n_clicks, doc_type, description, count):
             if not n_clicks or not description:
-                return dash.no_update, dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update
             
-            # Start generation process
+            # Reset and start generation state
+            self.generation_state = {
+                'active': True,
+                'current_doc': 0,
+                'total_docs': count,
+                'current_step': 'Initializing...',
+                'completed_files': [],
+                'error': None,
+                'start_time': time.time(),
+                'doc_type': doc_type,
+                'description': description
+            }
+            
+            # Start generation in background thread
+            threading.Thread(
+                target=self._generate_documents_background, 
+                args=(doc_type, description, count),
+                daemon=True
+            ).start()
+            
+            # Enable interval and disable button
+            return False, {'status': 'started'}, True
+
+        # Progress update callback
+        @self.app.callback(
+            Output('generation-status', 'children'),
+            Output('progress-interval', 'disabled', allow_duplicate=True),
+            Output('generate-button', 'disabled', allow_duplicate=True),
+            Output('generation-store', 'data'),
+            Input('progress-interval', 'n_intervals'),
+            prevent_initial_call=True
+        )
+        def update_progress(n_intervals):
+            if not self.generation_state['active'] and self.generation_state['current_doc'] == 0:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            
+            # Calculate progress
+            progress_percent = 0
+            if self.generation_state['total_docs'] > 0:
+                progress_percent = (self.generation_state['current_doc'] / self.generation_state['total_docs']) * 100
+            
+            # Check if generation is complete
+            if not self.generation_state['active']:
+                if self.generation_state['error']:
+                    # Error state
+                    error_message = dbc.Alert([
+                        html.H5("❌ Generation Failed", className="mb-2"),
+                        html.P(f"Error: {self.generation_state['error']}")
+                    ], color="danger")
+                    return error_message, True, False, {'status': 'error', 'error': self.generation_state['error']}
+                else:
+                    # Success state
+                    elapsed_time = time.time() - self.generation_state['start_time']
+                    success_message = dbc.Alert([
+                        html.H5("✅ Generation Complete!", className="mb-2"),
+                        html.P(f"Successfully generated {len(self.generation_state['completed_files'])} document(s) in {elapsed_time:.1f} seconds"),
+                        html.Ul([
+                            html.Li(file_info['filename']) for file_info in self.generation_state['completed_files']
+                        ]),
+                        html.Hr(),
+                        html.P([
+                            "Files saved to: ",
+                            html.Code(self.volume_path)
+                        ], className="mb-0")
+                    ], color="success")
+                    return success_message, True, False, {'status': 'complete', 'files': self.generation_state['completed_files']}
+            
+            # Active generation state
             status_message = dbc.Alert([
-                html.H5("🔄 Generating Documents...", className="mb-2"),
-                html.P(f"Creating {count} {self._format_doc_type(doc_type)} document(s)"),
-                dbc.Progress(id="progress-bar", value=0, striped=True, animated=True)
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-spinner fa-spin me-2"),
+                        html.H5("🔄 Generating Documents...", className="d-inline mb-0")
+                    ], className="d-flex align-items-center mb-3"),
+                    
+                    html.P(f"Document {self.generation_state['current_doc']} of {self.generation_state['total_docs']}", className="mb-2"),
+                    html.P(f"Current step: {self.generation_state['current_step']}", className="mb-3 text-muted"),
+                    
+                    dbc.Progress(
+                        value=progress_percent,
+                        striped=True,
+                        animated=True,
+                        className="mb-2"
+                    ),
+                    html.P(f"{progress_percent:.0f}% Complete", className="mb-0 text-center small")
+                ])
             ], color="info")
             
-            try:
-                # Generate documents
-                generated_files = self._generate_documents_batch(doc_type, description, count)
-                
-                # Success message
-                success_message = dbc.Alert([
-                    html.H5("✅ Generation Complete!", className="mb-2"),
-                    html.P(f"Successfully generated {len(generated_files)} document(s):"),
-                    html.Ul([
-                        html.Li(file_info['filename']) for file_info in generated_files
-                    ]),
-                    html.Hr(),
-                    html.P([
-                        "Files saved to: ",
-                        html.Code(self.volume_path)
-                    ], className="mb-0")
-                ], color="success")
-                
-                return success_message, {'status': 'complete', 'files': generated_files}
-                
-            except Exception as e:
-                error_message = dbc.Alert([
-                    html.H5("❌ Generation Failed", className="mb-2"),
-                    html.P(f"Error: {str(e)}")
-                ], color="danger")
-                
-                return error_message, {'status': 'error', 'error': str(e)}
+            return status_message, False, True, {'status': 'generating', 'progress': progress_percent}
 
-    def _generate_documents_batch(self, doc_type, description, count):
-        """Generate multiple documents based on the specified parameters."""
-        generated_files = []
-        
-        for i in range(count):
-            # Generate content using the serving endpoint
-            content = self._generate_document_content(doc_type, description, i + 1)
-            
-            # Create filename
+    def _generate_documents_background(self, doc_type, description, count):
+        """Generate documents in background thread with progress updates."""
+        try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{doc_type}_{timestamp}_{i+1:02d}.pdf"
             
-            # Generate PDF
-            pdf_path = self._create_pdf(content, filename, doc_type)
+            for i in range(count):
+                # Update progress
+                self.generation_state['current_doc'] = i + 1
+                self.generation_state['current_step'] = f"Generating content for document {i + 1}..."
+                
+                # Generate content using the serving endpoint
+                content = self._generate_document_content(doc_type, description, i + 1)
+                
+                # Update progress
+                self.generation_state['current_step'] = f"Creating PDF for document {i + 1}..."
+                
+                # Create filename
+                filename = f"{doc_type}_{timestamp}_{i+1:02d}.pdf"
+                
+                # Generate PDF
+                pdf_path = self._create_pdf(content, filename, doc_type)
+                
+                # Update progress
+                self.generation_state['current_step'] = f"Saving document {i + 1} to volume..."
+                
+                file_info = {
+                    'filename': filename,
+                    'path': pdf_path,
+                    'doc_type': doc_type,
+                    'size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
+                }
+                
+                self.generation_state['completed_files'].append(file_info)
+                
+                # Small delay between generations
+                if i < count - 1:  # Don't delay after the last document
+                    self.generation_state['current_step'] = f"Preparing next document..."
+                    time.sleep(0.5)
             
-            generated_files.append({
-                'filename': filename,
-                'path': pdf_path,
-                'doc_type': doc_type,
-                'size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
-            })
+            # Mark as complete
+            self.generation_state['active'] = False
+            self.generation_state['current_step'] = 'Complete!'
             
-            # Small delay between generations to avoid rate limiting
-            time.sleep(0.5)
-        
-        return generated_files
+        except Exception as e:
+            print(f"Error in background generation: {str(e)}")
+            self.generation_state['active'] = False
+            self.generation_state['error'] = str(e)
 
     def _generate_document_content(self, doc_type, description, doc_number):
         """Generate document content using the serving endpoint."""
@@ -148,20 +240,24 @@ Generate a complete customer profile with realistic data (use fictional informat
         try:
             response = query_endpoint(self.endpoint_name, messages, max_tokens=2048)
             
-            # Extract content using the same logic as the fixed chatbot
-            if isinstance(response, dict):
-                if "content" in response:
-                    return response["content"]
-                elif "summary" in response:
-                    return response["summary"]
-                elif "text" in response:
-                    return response["text"]
-                elif "message" in response:
-                    return response["message"]
-                else:
-                    return str(response)
-            else:
-                return str(response)
+            # Debug logging
+            print(f"Raw response type: {type(response)}")
+            print(f"Raw response: {response}")
+            
+            # Extract content using robust logic to handle different response types
+            content = self._extract_content_safely(response)
+            
+            # Ensure content is always a string
+            if isinstance(content, list):
+                print(f"Content is list, converting to string: {content}")
+                # If content is a list, join it into a string
+                content = '\n\n'.join(str(item) for item in content)
+            elif not isinstance(content, str):
+                print(f"Content is not string ({type(content)}), converting: {content}")
+                content = str(content)
+            
+            print(f"Final content type: {type(content)}")
+            return content
                 
         except Exception as e:
             print(f"Error generating content: {str(e)}")
@@ -206,6 +302,10 @@ Generate a complete customer profile with realistic data (use fictional informat
         story.append(Paragraph(title, title_style))
         story.append(Spacer(1, 0.2*inch))
         
+        # Ensure content is a string before processing
+        if not isinstance(content, str):
+            content = str(content)
+        
         # Content - split by paragraphs and create PDF elements
         paragraphs = content.split('\n\n')
         for para in paragraphs:
@@ -245,3 +345,112 @@ Generate a complete customer profile with realistic data (use fictional informat
             'customer_profile': 'Customer Profile'
         }
         return type_map.get(doc_type, doc_type.replace('_', ' ').title())
+
+    def _extract_content_safely(self, response):
+        """Safely extract content from various response formats."""
+        if isinstance(response, dict):
+            # Try common keys in order of preference
+            for key in ["content", "summary", "text", "message"]:
+                if key in response:
+                    value = response[key]
+                    # Handle nested structures
+                    if isinstance(value, dict) and "content" in value:
+                        return value["content"]
+                    elif isinstance(value, list):
+                        # If it's a list, try to extract content from each item
+                        extracted_items = []
+                        for item in value:
+                            if isinstance(item, dict):
+                                if "content" in item:
+                                    extracted_items.append(item["content"])
+                                elif "text" in item:
+                                    extracted_items.append(item["text"])
+                                else:
+                                    extracted_items.append(str(item))
+                            else:
+                                extracted_items.append(str(item))
+                        return '\n\n'.join(extracted_items) if extracted_items else str(value)
+                    else:
+                        return value
+            
+            # If none of the expected keys exist, return string representation
+            return str(response)
+        elif isinstance(response, list):
+            # If response is directly a list, extract content from each item
+            extracted_items = []
+            for item in response:
+                if isinstance(item, dict):
+                    content = self._extract_content_safely(item)  # Recursive call
+                    extracted_items.append(content)
+                else:
+                    extracted_items.append(str(item))
+            return '\n\n'.join(extracted_items) if extracted_items else str(response)
+        else:
+            return str(response)
+
+    def _add_custom_css(self):
+        """Add custom CSS for animations and styling."""
+        custom_css = '''
+        @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background-color: #F9F7F4;
+        }
+        
+        .fa-spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .generate-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .progress-container {
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .alert-info {
+            border-left: 4px solid #17a2b8;
+        }
+        
+        .alert-success {
+            border-left: 4px solid #28a745;
+        }
+        
+        .alert-danger {
+            border-left: 4px solid #dc3545;
+        }
+        
+        .document-config-card {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+        }
+        
+        .form-label {
+            color: #1B3139;
+            font-weight: 600;
+        }
+        
+        .progress {
+            height: 8px;
+            border-radius: 4px;
+        }
+        
+        .progress-bar {
+            background: linear-gradient(90deg, #17a2b8, #28a745);
+        }
+        '''
+        
+        self.app.index_string = self.app.index_string.replace(
+            '</head>',
+            f'<style>{custom_css}</style></head>'
+        )
