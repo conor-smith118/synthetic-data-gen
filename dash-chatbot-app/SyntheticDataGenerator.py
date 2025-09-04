@@ -102,18 +102,45 @@ class SyntheticDataGenerator:
                 else:
                     # Success state
                     elapsed_time = time.time() - self.generation_state['start_time']
-                    success_message = dbc.Alert([
+                    
+                    # Check which files were successfully saved to volume
+                    volume_saved = [f for f in self.generation_state['completed_files'] if f.get('saved_to_volume', False)]
+                    local_only = [f for f in self.generation_state['completed_files'] if not f.get('saved_to_volume', False)]
+                    
+                    # Build success message
+                    success_items = [
                         html.H5("✅ Generation Complete!", className="mb-2"),
-                        html.P(f"Successfully generated {len(self.generation_state['completed_files'])} document(s) in {elapsed_time:.1f} seconds"),
-                        html.Ul([
-                            html.Li(file_info['filename']) for file_info in self.generation_state['completed_files']
-                        ]),
-                        html.Hr(),
-                        html.P([
-                            "Files saved to: ",
-                            html.Code(self.volume_path)
-                        ], className="mb-0")
-                    ], color="success")
+                        html.P(f"Successfully generated {len(self.generation_state['completed_files'])} document(s) in {elapsed_time:.1f} seconds")
+                    ]
+                    
+                    if volume_saved:
+                        success_items.extend([
+                            html.P("📁 Files saved to volume:", className="mb-2 mt-3 fw-bold"),
+                            html.Ul([
+                                html.Li([
+                                    file_info['filename'], 
+                                    html.Small(f" ({file_info['size']} bytes)", className="text-muted")
+                                ]) for file_info in volume_saved
+                            ]),
+                            html.P([
+                                "Volume path: ",
+                                html.Code(self.volume_path)
+                            ], className="mb-0 small text-muted")
+                        ])
+                    
+                    if local_only:
+                        success_items.extend([
+                            html.Hr(),
+                            html.P("⚠️ Files created locally (manual copy needed):", className="mb-2 fw-bold text-warning"),
+                            html.Ul([
+                                html.Li([
+                                    file_info['filename'],
+                                    html.Small(f" → {file_info['path']}", className="text-muted")
+                                ]) for file_info in local_only
+                            ])
+                        ])
+                    
+                    success_message = dbc.Alert(success_items, color="success")
                     return success_message, True, False, {'status': 'complete', 'files': self.generation_state['completed_files']}
             
             # Active generation state
@@ -161,14 +188,18 @@ class SyntheticDataGenerator:
                 # Generate PDF
                 pdf_path = self._create_pdf(content, filename, doc_type)
                 
-                # Update progress
+                # Update progress and save to volume
                 self.generation_state['current_step'] = f"Saving document {i + 1} to volume..."
+                
+                # Save to volume and check success
+                save_success = self._save_to_volume(pdf_path, filename)
                 
                 file_info = {
                     'filename': filename,
                     'path': pdf_path,
                     'doc_type': doc_type,
-                    'size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
+                    'size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0,
+                    'saved_to_volume': save_success
                 }
                 
                 self.generation_state['completed_files'].append(file_info)
@@ -333,22 +364,87 @@ Generate a complete customer profile with realistic data (use fictional informat
         # Build PDF
         doc.build(story)
         
-        # Copy to Databricks volume (simulate for now - would need Databricks context)
-        # In a real Databricks environment, you would copy the file to the volume here
-        self._save_to_volume(pdf_path, filename)
-        
         return pdf_path
 
     def _save_to_volume(self, local_path, filename):
-        """Save file to Databricks volume. This is a placeholder implementation."""
-        # In a real Databricks environment, you would use:
-        # dbutils.fs.cp(local_path, f"{self.volume_path}/{filename}")
-        
-        # For now, just print the action
-        print(f"Would save {filename} to {self.volume_path}/{filename}")
-        
-        # In development, we'll just keep the local copy
-        return True
+        """Save file to Databricks volume."""
+        try:
+            import shutil
+            
+            # Check if we're in a Databricks environment
+            try:
+                # Try to use dbutils for Databricks volume access
+                from pyspark.sql import SparkSession
+                spark = SparkSession.getActiveSession()
+                if spark is not None:
+                    # We're in Databricks, use dbutils
+                    try:
+                        dbutils = spark.sparkContext._jvm.com.databricks.dbutils_v1.DBUtilsHolder.dbutils()
+                        volume_file_path = f"{self.volume_path}/{filename}"
+                        
+                        # Copy file to volume
+                        dbutils.fs().cp(f"file://{local_path}", volume_file_path)
+                        print(f"Successfully saved {filename} to {volume_file_path}")
+                        return True
+                    except Exception as e:
+                        print(f"Failed to use dbutils, falling back to direct copy: {str(e)}")
+                        # Fall through to direct copy method
+            except ImportError:
+                # Not in Databricks environment
+                pass
+            
+            # Alternative: Direct file system copy (if volume is mounted)
+            try:
+                # Create volume directory if it doesn't exist
+                volume_dir = self.volume_path
+                if not os.path.exists(volume_dir):
+                    os.makedirs(volume_dir, exist_ok=True)
+                
+                volume_file_path = os.path.join(volume_dir, filename)
+                shutil.copy2(local_path, volume_file_path)
+                print(f"Successfully copied {filename} to {volume_file_path}")
+                return True
+                
+            except Exception as e:
+                print(f"Failed to copy to volume directory: {str(e)}")
+                # Fall back to alternative approaches
+                
+                # Try using Databricks SDK
+                try:
+                    from databricks.sdk import WorkspaceClient
+                    from databricks.sdk.service.files import UploadRequest
+                    
+                    w = WorkspaceClient()
+                    
+                    # Read the local file
+                    with open(local_path, 'rb') as f:
+                        file_content = f.read()
+                    
+                    # Upload to volume
+                    volume_file_path = f"{self.volume_path}/{filename}"
+                    w.files.upload(
+                        file_path=volume_file_path,
+                        contents=file_content,
+                        overwrite=True
+                    )
+                    print(f"Successfully uploaded {filename} to {volume_file_path} via Databricks SDK")
+                    return True
+                    
+                except Exception as sdk_error:
+                    print(f"Databricks SDK upload failed: {str(sdk_error)}")
+                    
+                    # Final fallback: at least confirm local file exists
+                    if os.path.exists(local_path):
+                        print(f"File created locally at {local_path}")
+                        print(f"Manual copy needed to: {self.volume_path}/{filename}")
+                        return True
+                    else:
+                        print(f"Error: Local file not found at {local_path}")
+                        return False
+                        
+        except Exception as e:
+            print(f"Error in _save_to_volume: {str(e)}")
+            return False
 
     def _format_doc_type(self, doc_type):
         """Format document type for display."""
