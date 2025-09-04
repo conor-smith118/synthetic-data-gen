@@ -4,3 +4,4 @@ mlflow>=2.21.2
 python-dotenv==1.1.0
 databricks-sdk
 reportlab>=4.0.0
+python-docx>=1.1.0

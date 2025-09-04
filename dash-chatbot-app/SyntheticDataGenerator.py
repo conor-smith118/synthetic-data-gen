@@ -12,6 +12,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from databricks.sdk import WorkspaceClient
 import threading
+import io
+from docx import Document
 
 class SyntheticDataGenerator:
     def __init__(self, app, endpoint_name):
@@ -267,8 +269,9 @@ class SyntheticDataGenerator:
              Input({'type': 'pdf-doc-type', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'pdf-count', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-description', 'index': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'text-type', 'index': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'text-words', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'text-doc-type', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'text-format', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'text-count', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'tabular-description', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'tabular-type', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'tabular-rows', 'index': dash.dependencies.ALL}, 'value')],
@@ -311,10 +314,12 @@ class SyntheticDataGenerator:
                             op['config']['count'] = new_value
                         elif comp_type == 'text-description':
                             op['config']['description'] = new_value
-                        elif comp_type == 'text-type':
-                            op['config']['text_type'] = new_value
-                        elif comp_type == 'text-words':
-                            op['config']['word_count'] = new_value
+                        elif comp_type == 'text-doc-type':
+                            op['config']['doc_type'] = new_value
+                        elif comp_type == 'text-format':
+                            op['config']['file_format'] = new_value
+                        elif comp_type == 'text-count':
+                            op['config']['count'] = new_value
                         elif comp_type == 'tabular-description':
                             op['config']['description'] = new_value
                         elif comp_type == 'tabular-type':
@@ -409,34 +414,43 @@ class SyntheticDataGenerator:
             ]
         elif op_type == 'text':
             config_inputs = [
-                html.Label("Text Type:", className="form-label fw-bold"),
+                html.Label("Document Type:", className="form-label fw-bold"),
                 dcc.Dropdown(
-                    id={'type': 'text-type', 'index': op_id},
+                    id={'type': 'text-doc-type', 'index': op_id},
                     options=[
-                        {'label': 'Marketing Copy', 'value': 'marketing'},
-                        {'label': 'Product Description', 'value': 'product'},
-                        {'label': 'Email Template', 'value': 'email'},
-                        {'label': 'Blog Post', 'value': 'blog'}
+                        {'label': 'Policy Guide', 'value': 'policy_guide'},
+                        {'label': 'Customer Correspondence', 'value': 'customer_correspondence'},
+                        {'label': 'Customer Profile', 'value': 'customer_profile'}
                     ],
-                    value=config.get('text_type', 'marketing'),
+                    value=config.get('doc_type', 'policy_guide'),
+                    className="mb-3"
+                ),
+                html.Label("File Format:", className="form-label fw-bold"),
+                dcc.Dropdown(
+                    id={'type': 'text-format', 'index': op_id},
+                    options=[
+                        {'label': 'Text File (.txt)', 'value': 'txt'},
+                        {'label': 'Word Document (.docx)', 'value': 'docx'}
+                    ],
+                    value=config.get('file_format', 'txt'),
                     className="mb-3"
                 ),
                 html.Label("Description:", className="form-label fw-bold"),
                 dbc.Textarea(
                     id={'type': 'text-description', 'index': op_id},
-                    placeholder="Describe the text content you want to generate...",
+                    placeholder="Describe the text document you want to generate...",
                     value=config.get('description', ''),
                     rows=3,
                     className="mb-3"
                 ),
-                html.Label("Word Count Target:", className="form-label fw-bold"),
+                html.Label("Number of Documents:", className="form-label fw-bold"),
                 dcc.Slider(
-                    id={'type': 'text-words', 'index': op_id},
-                    min=100,
-                    max=2000,
-                    step=100,
-                    value=config.get('word_count', 500),
-                    marks={i: f"{i}w" for i in range(100, 2001, 500)},
+                    id={'type': 'text-count', 'index': op_id},
+                    min=1,
+                    max=10,
+                    step=1,
+                    value=config.get('count', 1),
+                    marks={i: str(i) for i in range(1, 11)},
                     className="mb-3"
                 )
             ]
@@ -557,16 +571,22 @@ class SyntheticDataGenerator:
         return items
 
     def _process_text_operation(self, operation, company_name, company_sector):
-        """Process a text generation operation (placeholder)."""
+        """Process a text generation operation."""
         config = operation.get('config', {})
-        text_type = config.get('text_type', 'marketing')
-        description = config.get('description', 'Sample text')
-        word_count = config.get('word_count', 500)
+        doc_type = config.get('doc_type', 'policy_guide')
+        description = config.get('description', 'Sample document')
+        file_format = config.get('file_format', 'txt')
+        count = config.get('count', 1)
         
+        items = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        enhanced_description = f"For {company_name} (a {company_sector} company): {description} (target: {word_count} words)"
         
-        return self._generate_text_item(enhanced_description, company_name, company_sector, timestamp)
+        for i in range(count):
+            enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
+            item = self._generate_text_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, file_format)
+            items.append(item)
+        
+        return items
 
     def _process_tabular_operation(self, operation, company_name, company_sector):
         """Process a tabular data generation operation (placeholder)."""
@@ -786,6 +806,111 @@ Generate a complete customer profile with realistic data (use fictional informat
         doc.build(story)
         
         return pdf_path
+    
+    def _create_txt(self, content, filepath, company_name):
+        """Create a text file with the generated content."""
+        try:
+            # Clean the content for text format
+            clean_content = self._sanitize_content_for_text(content)
+            
+            # Add header information
+            header = f"{company_name} - Generated Document\n"
+            header += "=" * len(header.strip()) + "\n\n"
+            header += f"Generated on: {datetime.now().strftime('%Y-%m-%d at %I:%M %p')}\n\n"
+            
+            # Combine header and content
+            full_content = header + clean_content
+            
+            # Write to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(full_content)
+                
+        except Exception as e:
+            print(f"Error creating text file: {str(e)}")
+            raise
+    
+    def _create_docx(self, content, filepath, company_name):
+        """Create a Word document with the generated content."""
+        try:
+            # Clean the content for docx format
+            clean_content = self._sanitize_content_for_text(content)
+            
+            # Create document
+            doc = Document()
+            
+            # Add title
+            title = doc.add_heading(f'{company_name} - Generated Document', 0)
+            
+            # Add generation timestamp
+            timestamp_para = doc.add_paragraph()
+            timestamp_para.add_run(f'Generated on: {datetime.now().strftime("%Y-%m-%d at %I:%M %p")}').italic = True
+            
+            # Add a line break
+            doc.add_paragraph()
+            
+            # Process content - split by paragraphs and handle formatting
+            paragraphs = clean_content.split('\n\n')
+            
+            for para_text in paragraphs:
+                if para_text.strip():
+                    # Check if it looks like a heading (starts with #, all caps, or ends with :)
+                    if (para_text.strip().startswith('#') or 
+                        para_text.strip().isupper() or 
+                        para_text.strip().endswith(':')):
+                        # Add as heading
+                        heading_text = para_text.strip().lstrip('#').strip()
+                        doc.add_heading(heading_text, level=1)
+                    else:
+                        # Add as regular paragraph
+                        para = doc.add_paragraph()
+                        # Handle basic formatting
+                        lines = para_text.strip().split('\n')
+                        for i, line in enumerate(lines):
+                            if i > 0:
+                                para.add_run('\n')
+                            para.add_run(line.strip())
+            
+            # Save document
+            doc.save(filepath)
+            
+        except Exception as e:
+            print(f"Error creating Word document: {str(e)}")
+            raise
+    
+    def _sanitize_content_for_text(self, content):
+        """Sanitize content for text/docx format."""
+        if not isinstance(content, str):
+            content = str(content)
+        
+        # Remove HTML/XML tags
+        import re
+        content = re.sub(r'<[^>]+>', '', content)
+        
+        # Clean up excessive whitespace
+        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
+        content = re.sub(r'[ \t]+', ' ', content)
+        
+        # Remove markdown table formatting for text
+        lines = content.split('\n')
+        clean_lines = []
+        for line in lines:
+            # Skip markdown table separator lines
+            if re.match(r'^\s*\|[\s\-\|]*\|\s*$', line):
+                continue
+            # Convert table rows to simple text
+            if '|' in line and not line.strip().startswith('|'):
+                # This might be a table row, convert to simple format
+                parts = [part.strip() for part in line.split('|') if part.strip()]
+                if len(parts) > 1:
+                    line = ' - '.join(parts)
+            clean_lines.append(line)
+        
+        content = '\n'.join(clean_lines)
+        
+        # Ensure content doesn't start with newlines
+        content = content.strip()
+        
+        return content
 
     def _save_to_volume(self, local_path, filename):
         """Save file to Databricks volume using WorkspaceClient pattern from cookbook."""
@@ -1135,38 +1260,63 @@ Generate a complete customer profile with realistic data (use fictional informat
             'saved_to_volume': save_success
         }
 
-    def _generate_text_item(self, description, company_name, company_sector, timestamp):
-        """Generate a text item (placeholder implementation)."""
-        self.generation_state['current_step'] = f"Generating text content..."
-        
-        # Enhanced prompt with company context
-        enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
-        
-        # For now, create a simple text file
-        filename = f"synthetic_text_{timestamp}.txt"
-        local_dir = "./generated_documents"
-        os.makedirs(local_dir, exist_ok=True)
-        text_path = os.path.join(local_dir, filename)
-        
-        with open(text_path, 'w') as f:
-            f.write(f"PLACEHOLDER TEXT DOCUMENT\n")
-            f.write(f"Company: {company_name}\n")
-            f.write(f"Sector: {company_sector}\n")
-            f.write(f"Description: {enhanced_description}\n")
-            f.write(f"Generated: {datetime.now()}\n\n")
-            f.write("This is a placeholder implementation for text generation.\n")
-            f.write("Future versions will use the LLM to generate rich text content.")
-        
-        return {
-            'type': 'text',
-            'filename': filename,
-            'path': text_path,
-            'description': description,
-            'company_name': company_name,
-            'company_sector': company_sector,
-            'size': os.path.getsize(text_path),
-            'saved_to_volume': False  # Placeholder doesn't save to volume
-        }
+    def _generate_text_item(self, description, company_name, company_sector, timestamp, doc_type, file_format):
+        """Generate a single text document with LLM content."""
+        try:
+            # Generate content using LLM (similar to PDF generation)
+            self.generation_state['current_step'] = f"Generating {file_format.upper()} content..."
+            content = self._generate_document_content(doc_type, description, company_name, company_sector)
+            
+            # Create filename based on format
+            if file_format == 'docx':
+                filename = f"{doc_type}_{timestamp}.docx"
+                extension = 'docx'
+            else:
+                filename = f"{doc_type}_{timestamp}.txt"
+                extension = 'txt'
+                
+            # Create local file
+            os.makedirs('./generated_documents', exist_ok=True)
+            local_path = f"./generated_documents/{filename}"
+            
+            if file_format == 'docx':
+                self._create_docx(content, local_path, company_name)
+            else:
+                self._create_txt(content, local_path, company_name)
+            
+            # Save to volume
+            self.generation_state['current_step'] = f"Saving {extension.upper()} to volume..."
+            volume_success = self._save_to_volume(local_path, filename)
+            
+            return {
+                'type': 'text',
+                'description': description,
+                'filename': filename,
+                'format': file_format,
+                'doc_type': doc_type,
+                'path': local_path,
+                'timestamp': timestamp,
+                'company_name': company_name,
+                'company_sector': company_sector,
+                'saved_to_volume': volume_success,
+                'size': os.path.getsize(local_path) if os.path.exists(local_path) else 0
+            }
+            
+        except Exception as e:
+            print(f"Error generating text document: {str(e)}")
+            return {
+                'type': 'text',
+                'description': description,
+                'filename': f"error_{timestamp}.txt",
+                'format': file_format,
+                'error': str(e),
+                'timestamp': timestamp,
+                'company_name': company_name,
+                'company_sector': company_sector,
+                'saved_to_volume': False,
+                'path': None,
+                'size': 0
+            }
 
     def _generate_tabular_item(self, description, company_name, company_sector, timestamp):
         """Generate tabular data (placeholder implementation)."""
