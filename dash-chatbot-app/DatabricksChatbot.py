@@ -107,7 +107,28 @@ class DatabricksChatbot:
     def _call_model_endpoint(self, messages, max_tokens=128):
         try:
             print('Calling model endpoint...')
-            return query_endpoint(self.endpoint_name, messages, max_tokens)["content"]
+            response = query_endpoint(self.endpoint_name, messages, max_tokens)
+            
+            # Handle different response structures from Databricks endpoints
+            if isinstance(response, dict):
+                # Try common keys in order of preference
+                if "content" in response:
+                    return response["content"]
+                elif "summary" in response:
+                    return response["summary"]
+                elif "text" in response:
+                    return response["text"]
+                elif "message" in response:
+                    return response["message"]
+                else:
+                    # If none of the expected keys exist, return a string representation
+                    print(f"Unexpected response structure: {response}")
+                    return f"Response: {str(response)}"
+            elif isinstance(response, str):
+                return response
+            else:
+                print(f"Unexpected response type: {type(response)}")
+                return f"Response: {str(response)}"
         except Exception as e:
             print(f'Error calling model endpoint: {str(e)}')
             raise
@@ -115,11 +136,28 @@ class DatabricksChatbot:
     def _format_chat_display(self, chat_history):
         return [
             html.Div([
-                html.Div(msg['content'],
+                html.Div(self._ensure_string_content(msg.get('content', '')),
                          className=f"chat-message {msg['role']}-message")
             ], className=f"message-container {msg['role']}-container")
             for msg in chat_history if isinstance(msg, dict) and 'role' in msg
         ]
+    
+    def _ensure_string_content(self, content):
+        """Ensure content is a string that can be safely rendered by React."""
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, dict):
+            # If it's a dict, try to extract meaningful text
+            if 'summary' in content:
+                return content['summary']
+            elif 'content' in content:
+                return content['content']
+            elif 'text' in content:
+                return content['text']
+            else:
+                return str(content)
+        else:
+            return str(content)
 
     def _create_typing_indicator(self):
         return html.Div([
