@@ -240,23 +240,16 @@ Generate a complete customer profile with realistic data (use fictional informat
         try:
             response = query_endpoint(self.endpoint_name, messages, max_tokens=2048)
             
-            # Debug logging
-            print(f"Raw response type: {type(response)}")
-            print(f"Raw response: {response}")
-            
             # Extract content using robust logic to handle different response types
             content = self._extract_content_safely(response)
             
             # Ensure content is always a string
             if isinstance(content, list):
-                print(f"Content is list, converting to string: {content}")
                 # If content is a list, join it into a string
                 content = '\n\n'.join(str(item) for item in content)
             elif not isinstance(content, str):
-                print(f"Content is not string ({type(content)}), converting: {content}")
                 content = str(content)
             
-            print(f"Final content type: {type(content)}")
             return content
                 
         except Exception as e:
@@ -302,20 +295,40 @@ Generate a complete customer profile with realistic data (use fictional informat
         story.append(Paragraph(title, title_style))
         story.append(Spacer(1, 0.2*inch))
         
-        # Ensure content is a string before processing
-        if not isinstance(content, str):
-            content = str(content)
+        # Sanitize content for PDF generation
+        content = self._sanitize_content_for_pdf(content)
         
         # Content - split by paragraphs and create PDF elements
         paragraphs = content.split('\n\n')
         for para in paragraphs:
             if para.strip():
-                # Handle headers (lines that might be section titles)
-                if len(para) < 100 and para.strip().endswith(':'):
-                    story.append(Paragraph(para.strip(), styles['Heading2']))
-                else:
-                    story.append(Paragraph(para.strip(), body_style))
-                story.append(Spacer(1, 0.1*inch))
+                try:
+                    # Clean the paragraph text for ReportLab
+                    para_text = para.strip()
+                    
+                    # Escape special characters that might cause ReportLab issues
+                    para_text = para_text.replace('&', '&amp;')
+                    para_text = para_text.replace('<', '&lt;')
+                    para_text = para_text.replace('>', '&gt;')
+                    
+                    # Handle headers (lines that might be section titles)
+                    if len(para_text) < 100 and para_text.endswith(':'):
+                        story.append(Paragraph(para_text, styles['Heading2']))
+                    else:
+                        story.append(Paragraph(para_text, body_style))
+                    story.append(Spacer(1, 0.1*inch))
+                except Exception as e:
+                    # If paragraph creation fails, add as plain text
+                    print(f"Warning: Could not create paragraph, adding as plain text: {str(e)}")
+                    # Convert to safe text and add as simple paragraph
+                    safe_text = para.strip().replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    try:
+                        story.append(Paragraph(safe_text, body_style))
+                        story.append(Spacer(1, 0.1*inch))
+                    except:
+                        # Last resort: skip this paragraph
+                        print(f"Skipping problematic paragraph: {para[:100]}...")
+                        continue
         
         # Build PDF
         doc.build(story)
@@ -345,6 +358,59 @@ Generate a complete customer profile with realistic data (use fictional informat
             'customer_profile': 'Customer Profile'
         }
         return type_map.get(doc_type, doc_type.replace('_', ' ').title())
+
+    def _sanitize_content_for_pdf(self, content):
+        """Clean content to make it safe for PDF generation."""
+        if not isinstance(content, str):
+            content = str(content)
+        
+        import re
+        
+        # Remove HTML/XML tags
+        content = re.sub(r'<[^>]+>', '', content)
+        
+        # Convert markdown tables to readable text
+        lines = content.split('\n')
+        cleaned_lines = []
+        in_table = False
+        
+        for line in lines:
+            # Detect table rows (lines with multiple | characters)
+            if '|' in line and line.count('|') >= 2:
+                in_table = True
+                # Clean up table formatting
+                cells = [cell.strip() for cell in line.split('|') if cell.strip()]
+                if cells:  # Skip empty rows
+                    # Skip header separator rows (like |------|-----|)
+                    if not all(cell.replace('-', '').replace(' ', '') == '' for cell in cells):
+                        # Format as readable text
+                        if len(cells) >= 2:
+                            cleaned_lines.append(f"{cells[0]}: {' '.join(cells[1:])}")
+                        else:
+                            cleaned_lines.append(' '.join(cells))
+            else:
+                if in_table and line.strip() == '':
+                    in_table = False
+                    cleaned_lines.append('')  # Add space after table
+                elif not in_table:
+                    cleaned_lines.append(line)
+        
+        content = '\n'.join(cleaned_lines)
+        
+        # Clean up special characters that might cause issues
+        content = content.replace('\u2022', '•')  # Bullet points
+        content = content.replace('\u2011', '-')  # Non-breaking hyphens
+        content = content.replace('\u2013', '-')  # En dashes
+        content = content.replace('\u2014', '--') # Em dashes
+        
+        # Remove any remaining HTML entities
+        content = re.sub(r'&[a-zA-Z0-9#]+;', '', content)
+        
+        # Clean up excessive whitespace
+        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)  # Multiple blank lines
+        content = re.sub(r'[ \t]+', ' ', content)  # Multiple spaces/tabs
+        
+        return content.strip()
 
     def _extract_content_safely(self, response):
         """Safely extract content from various response formats."""
