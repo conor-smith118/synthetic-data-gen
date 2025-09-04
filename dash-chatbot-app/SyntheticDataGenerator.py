@@ -1265,7 +1265,19 @@ Generate a complete customer profile with realistic data (use fictional informat
         try:
             # Generate content using LLM (similar to PDF generation)
             self.generation_state['current_step'] = f"Generating {file_format.upper()} content..."
-            content = self._generate_document_content(doc_type, description, company_name, company_sector)
+            
+            # Enhance description with company context
+            enhanced_description = f"""For {company_name} (a {company_sector} company): {description}
+            
+Company Context:
+- Company Name: {company_name}
+- Industry Sector: {company_sector}
+
+Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization."""
+            
+            # Extract doc number from timestamp for document series numbering
+            doc_number = int(timestamp.split('_')[-1]) if '_' in timestamp else 1
+            content = self._generate_document_content(doc_type, enhanced_description, doc_number)
             
             # Create filename based on format
             if file_format == 'docx':
