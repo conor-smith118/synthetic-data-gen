@@ -52,71 +52,108 @@ else:
     
     app.layout = dbc.Container([
         html.H1("Synthetic Data Generator", className="text-center mb-4"),
-        html.P("Generate synthetic unstructured PDF documents using AI", 
+        html.P("Generate synthetic data for your organization using AI", 
                className="text-center text-muted mb-5"),
         
+        # Company Specifications Section
         dbc.Row([
             dbc.Col([
                 dbc.Card([
+                    dbc.CardHeader(html.H4("Company Specifications", className="mb-0")),
                     dbc.CardBody([
-                        html.H4("Document Configuration", className="mb-4"),
-                        
-                        # Document Type Selection
-                        html.Label("Document Type:", className="form-label fw-bold"),
-                        dcc.Dropdown(
-                            id='document-type-dropdown',
-                            options=[
-                                {'label': 'Policy Guide', 'value': 'policy_guide'},
-                                {'label': 'Customer Correspondence', 'value': 'customer_correspondence'},
-                                {'label': 'Customer Profile', 'value': 'customer_profile'}
-                            ],
-                            value='policy_guide',
-                            className="mb-3"
-                        ),
-                        
-                        # Description Text Area
-                        html.Label("Document Description:", className="form-label fw-bold"),
-                        dbc.Textarea(
-                            id='document-description',
-                            placeholder="Describe the content and characteristics of the synthetic documents you want to generate...",
-                            rows=4,
-                            className="mb-3"
-                        ),
-                        
-                        # Number of Documents
-                        html.Label("Number of Documents:", className="form-label fw-bold"),
-                        dcc.Slider(
-                            id='document-count-slider',
-                            min=1,
-                            max=10,
-                            step=1,
-                            value=1,
-                            marks={i: str(i) for i in range(1, 11)},
-                            className="mb-4"
-                        ),
-                        
-                        # Generate Button
-                        dbc.Button(
-                            "Generate Documents",
-                            id="generate-button",
-                            color="primary",
-                            size="lg",
-                            className="w-100 mb-3"
-                        ),
-                        
-                        # Progress and Status
-                        html.Div(id="generation-status", className="mb-3"),
-                        dcc.Store(id="generation-store"),
-                        dcc.Store(id="progress-store"),
-                        dcc.Interval(
-                            id="progress-interval",
-                            interval=500,  # Update every 500ms
-                            n_intervals=0,
-                            disabled=True
-                        )
+                        dbc.Row([
+                            dbc.Col([
+                                html.Label("Company Name:", className="form-label fw-bold"),
+                                dbc.Input(
+                                    id="company-name",
+                                    placeholder="Enter your company name (e.g., Acme Solutions Inc.)",
+                                    value="Acme Solutions Inc.",
+                                    className="mb-3"
+                                )
+                            ], width=6),
+                            dbc.Col([
+                                html.Label("Company Sector:", className="form-label fw-bold"),
+                                dcc.Dropdown(
+                                    id="company-sector",
+                                    options=[
+                                        {'label': 'Technology', 'value': 'technology'},
+                                        {'label': 'Healthcare', 'value': 'healthcare'},
+                                        {'label': 'Financial Services', 'value': 'financial_services'},
+                                        {'label': 'Manufacturing', 'value': 'manufacturing'},
+                                        {'label': 'Retail', 'value': 'retail'},
+                                        {'label': 'Education', 'value': 'education'},
+                                        {'label': 'Consulting', 'value': 'consulting'},
+                                        {'label': 'Other', 'value': 'other'}
+                                    ],
+                                    value='technology',
+                                    className="mb-3"
+                                )
+                            ], width=6)
+                        ])
                     ])
-                ])
-            ], width={'size': 8, 'offset': 2})
+                ], className="mb-4")
+            ], width=12)
+        ]),
+        
+        # Iterative Generation Section
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H4("Generate Synthetic Data", className="mb-0")),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Label("Data Type:", className="form-label fw-bold"),
+                                dcc.Dropdown(
+                                    id='data-type-selector',
+                                    options=[
+                                        {'label': 'Generate PDF', 'value': 'pdf'},
+                                        {'label': 'Generate Text', 'value': 'text'},
+                                        {'label': 'Generate Tabular Data', 'value': 'tabular'}
+                                    ],
+                                    value='pdf',
+                                    className="mb-3"
+                                )
+                            ], width=4),
+                            dbc.Col([
+                                html.Label("Description:", className="form-label fw-bold"),
+                                dbc.Input(
+                                    id='generation-description',
+                                    placeholder="Describe what you want to generate...",
+                                    className="mb-3"
+                                )
+                            ], width=6),
+                            dbc.Col([
+                                html.Label("Action:", className="form-label fw-bold"),
+                                dbc.Button(
+                                    "Generate",
+                                    id="iterative-generate-button",
+                                    color="success",
+                                    size="lg",
+                                    className="w-100"
+                                )
+                            ], width=2)
+                        ])
+                    ])
+                ], className="mb-4")
+            ], width=12)
+        ]),
+        
+        # Generation History and Status
+        dbc.Row([
+            dbc.Col([
+                html.Div(id="generation-history", className="mb-3"),
+                html.Div(id="current-generation-status", className="mb-3"),
+                dcc.Store(id="generation-store"),
+                dcc.Store(id="progress-store"),
+                dcc.Store(id="history-store", data=[]),
+                dcc.Interval(
+                    id="progress-interval",
+                    interval=500,  # Update every 500ms
+                    n_intervals=0,
+                    disabled=True
+                )
+            ], width=12)
         ])
     ], fluid=True)
 

@@ -34,38 +34,41 @@ class SyntheticDataGenerator:
         self._add_custom_css()
 
     def _create_callbacks(self):
-        # Start generation callback
+        # Start iterative generation callback
         @self.app.callback(
             Output('progress-interval', 'disabled'),
             Output('progress-store', 'data'),
-            Output('generate-button', 'disabled'),
-            Input('generate-button', 'n_clicks'),
-            State('document-type-dropdown', 'value'),
-            State('document-description', 'value'),
-            State('document-count-slider', 'value'),
+            Output('iterative-generate-button', 'disabled'),
+            Input('iterative-generate-button', 'n_clicks'),
+            State('data-type-selector', 'value'),
+            State('generation-description', 'value'),
+            State('company-name', 'value'),
+            State('company-sector', 'value'),
             prevent_initial_call=True
         )
-        def start_generation(n_clicks, doc_type, description, count):
+        def start_iterative_generation(n_clicks, data_type, description, company_name, company_sector):
             if not n_clicks or not description:
                 return dash.no_update, dash.no_update, dash.no_update
             
             # Reset and start generation state
             self.generation_state = {
                 'active': True,
-                'current_doc': 0,
-                'total_docs': count,
+                'current_item': 0,
+                'total_items': 1,  # Single item for iterative generation
                 'current_step': 'Initializing...',
-                'completed_files': [],
+                'completed_items': [],
                 'error': None,
                 'start_time': time.time(),
-                'doc_type': doc_type,
-                'description': description
+                'data_type': data_type,
+                'description': description,
+                'company_name': company_name or 'Acme Solutions Inc.',
+                'company_sector': company_sector or 'technology'
             }
             
             # Start generation in background thread
             threading.Thread(
-                target=self._generate_documents_background, 
-                args=(doc_type, description, count),
+                target=self._generate_data_background, 
+                args=(data_type, description, company_name, company_sector),
                 daemon=True
             ).start()
             
@@ -74,21 +77,21 @@ class SyntheticDataGenerator:
 
         # Progress update callback
         @self.app.callback(
-            Output('generation-status', 'children'),
+            Output('current-generation-status', 'children'),
             Output('progress-interval', 'disabled', allow_duplicate=True),
-            Output('generate-button', 'disabled', allow_duplicate=True),
+            Output('iterative-generate-button', 'disabled', allow_duplicate=True),
             Output('generation-store', 'data'),
             Input('progress-interval', 'n_intervals'),
             prevent_initial_call=True
         )
         def update_progress(n_intervals):
-            if not self.generation_state['active'] and self.generation_state['current_doc'] == 0:
+            if not self.generation_state['active'] and self.generation_state.get('current_item', 0) == 0:
                 return dash.no_update, dash.no_update, dash.no_update, dash.no_update
             
             # Calculate progress
             progress_percent = 0
-            if self.generation_state['total_docs'] > 0:
-                progress_percent = (self.generation_state['current_doc'] / self.generation_state['total_docs']) * 100
+            if self.generation_state.get('total_items', 0) > 0:
+                progress_percent = (self.generation_state.get('current_item', 0) / self.generation_state.get('total_items', 1)) * 100
             
             # Check if generation is complete
             if not self.generation_state['active']:
@@ -100,59 +103,28 @@ class SyntheticDataGenerator:
                     ], color="danger")
                     return error_message, True, False, {'status': 'error', 'error': self.generation_state['error']}
                 else:
-                    # Success state
+                    # Success state - item completed
                     elapsed_time = time.time() - self.generation_state['start_time']
+                    data_type = self.generation_state.get('data_type', 'item')
                     
-                    # Check which files were successfully saved to volume
-                    volume_saved = [f for f in self.generation_state['completed_files'] if f.get('saved_to_volume', False)]
-                    local_only = [f for f in self.generation_state['completed_files'] if not f.get('saved_to_volume', False)]
-                    
-                    # Build success message
-                    success_items = [
+                    success_message = dbc.Alert([
                         html.H5("✅ Generation Complete!", className="mb-2"),
-                        html.P(f"Successfully generated {len(self.generation_state['completed_files'])} document(s) in {elapsed_time:.1f} seconds")
-                    ]
+                        html.P(f"Successfully generated {self._format_data_type(data_type)} in {elapsed_time:.1f} seconds"),
+                        html.P("Ready to generate more data - adjust settings above and click Generate again!", className="mb-0 text-muted")
+                    ], color="success")
                     
-                    if volume_saved:
-                        success_items.extend([
-                            html.P("📁 Files saved to volume:", className="mb-2 mt-3 fw-bold"),
-                            html.Ul([
-                                html.Li([
-                                    file_info['filename'], 
-                                    html.Small(f" ({file_info['size']} bytes)", className="text-muted")
-                                ]) for file_info in volume_saved
-                            ]),
-                            html.P([
-                                "Volume path: ",
-                                html.Code(self.volume_path)
-                            ], className="mb-0 small text-muted")
-                        ])
-                    
-                    if local_only:
-                        success_items.extend([
-                            html.Hr(),
-                            html.P("⚠️ Files created locally (manual copy needed):", className="mb-2 fw-bold text-warning"),
-                            html.Ul([
-                                html.Li([
-                                    file_info['filename'],
-                                    html.Small(f" → {file_info['path']}", className="text-muted")
-                                ]) for file_info in local_only
-                            ])
-                        ])
-                    
-                    success_message = dbc.Alert(success_items, color="success")
-                    return success_message, True, False, {'status': 'complete', 'files': self.generation_state['completed_files']}
+                    return success_message, True, False, {'status': 'complete', 'items': self.generation_state.get('completed_items', [])}
             
             # Active generation state
+            data_type = self.generation_state.get('data_type', 'item')
             status_message = dbc.Alert([
                 html.Div([
                     html.Div([
                         html.I(className="fas fa-spinner fa-spin me-2"),
-                        html.H5("🔄 Generating Documents...", className="d-inline mb-0")
+                        html.H5(f"🔄 Generating {self._format_data_type(data_type)}...", className="d-inline mb-0")
                     ], className="d-flex align-items-center mb-3"),
                     
-                    html.P(f"Document {self.generation_state['current_doc']} of {self.generation_state['total_docs']}", className="mb-2"),
-                    html.P(f"Current step: {self.generation_state['current_step']}", className="mb-3 text-muted"),
+                    html.P(f"Current step: {self.generation_state.get('current_step', 'Processing...')}", className="mb-3 text-muted"),
                     
                     dbc.Progress(
                         value=progress_percent,
@@ -165,6 +137,59 @@ class SyntheticDataGenerator:
             ], color="info")
             
             return status_message, False, True, {'status': 'generating', 'progress': progress_percent}
+        
+        # History update callback
+        @self.app.callback(
+            Output('generation-history', 'children'),
+            Output('history-store', 'data'),
+            Input('generation-store', 'data'),
+            State('history-store', 'data'),
+            prevent_initial_call=True
+        )
+        def update_history(generation_data, history_data):
+            if not generation_data or generation_data.get('status') != 'complete':
+                return dash.no_update, dash.no_update
+            
+            # Add new generation to history
+            history_data = history_data or []
+            
+            new_entry = {
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'data_type': self.generation_state.get('data_type', 'unknown'),
+                'description': self.generation_state.get('description', 'No description'),
+                'company_name': self.generation_state.get('company_name', 'Unknown Company'),
+                'company_sector': self.generation_state.get('company_sector', 'unknown'),
+                'items': self.generation_state.get('completed_items', [])
+            }
+            
+            history_data.append(new_entry)
+            
+            # Build history display
+            history_cards = []
+            for i, entry in enumerate(reversed(history_data[-10:])):  # Show last 10 entries, most recent first
+                history_cards.append(
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.H6(f"{self._format_data_type(entry['data_type'])}", className="card-title mb-1"),
+                                html.P(f"Company: {entry['company_name']} ({entry['company_sector']})", className="mb-1 small text-muted"),
+                                html.P(f"Description: {entry['description']}", className="mb-1"),
+                                html.P(f"Generated: {entry['timestamp']}", className="mb-1 small text-muted"),
+                                self._format_items_display(entry['items'], entry['data_type'])
+                            ])
+                        ])
+                    ], className="mb-2")
+                )
+            
+            if history_cards:
+                history_display = [
+                    html.H4("Generation History", className="mb-3"),
+                    html.Div(history_cards)
+                ]
+            else:
+                history_display = []
+            
+            return history_display, history_data
 
     def _generate_documents_background(self, doc_type, description, count):
         """Generate documents in background thread with progress updates."""
@@ -607,3 +632,176 @@ Generate a complete customer profile with realistic data (use fictional informat
             '</head>',
             f'<style>{custom_css}</style></head>'
         )
+    
+    def _format_data_type(self, data_type):
+        """Format data type for display."""
+        type_map = {
+            'pdf': 'PDF Document',
+            'text': 'Text Document',
+            'tabular': 'Tabular Data'
+        }
+        return type_map.get(data_type, data_type.title())
+    
+    def _format_items_display(self, items, data_type):
+        """Format items for history display."""
+        if not items:
+            return html.P("No items generated", className="text-muted small")
+        
+        item_elements = []
+        for item in items:
+            if data_type == 'pdf':
+                icon = "📄"
+                size_info = f" ({item.get('size', 0):,} bytes)" if item.get('size') else ""
+                volume_status = " ✅" if item.get('saved_to_volume') else " 📁"
+            elif data_type == 'text':
+                icon = "📝"
+                size_info = f" ({item.get('size', 0):,} chars)" if item.get('size') else ""
+                volume_status = ""
+            elif data_type == 'tabular':
+                icon = "📊"
+                size_info = f" ({item.get('size', 0):,} bytes)" if item.get('size') else ""
+                volume_status = ""
+            else:
+                icon = "📄"
+                size_info = ""
+                volume_status = ""
+            
+            item_elements.append(
+                html.Li([
+                    f"{icon} {item.get('filename', 'Unknown file')}",
+                    html.Small(size_info + volume_status, className="text-muted")
+                ], className="small")
+            )
+        
+        return html.Ul(item_elements, className="mb-0")
+    
+    def _generate_data_background(self, data_type, description, company_name, company_sector):
+        """Generate data in background thread with progress updates."""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Update progress
+            self.generation_state['current_item'] = 1
+            self.generation_state['current_step'] = f"Generating {self._format_data_type(data_type)}..."
+            
+            if data_type == 'pdf':
+                # Generate PDF (existing functionality)
+                item_info = self._generate_pdf_item(description, company_name, company_sector, timestamp)
+            elif data_type == 'text':
+                # Generate text document
+                item_info = self._generate_text_item(description, company_name, company_sector, timestamp)
+            elif data_type == 'tabular':
+                # Generate tabular data
+                item_info = self._generate_tabular_item(description, company_name, company_sector, timestamp)
+            else:
+                raise Exception(f"Unknown data type: {data_type}")
+            
+            self.generation_state['completed_items'].append(item_info)
+            
+            # Mark as complete
+            self.generation_state['active'] = False
+            self.generation_state['current_step'] = 'Complete!'
+            
+        except Exception as e:
+            print(f"Error in background generation: {str(e)}")
+            self.generation_state['active'] = False
+            self.generation_state['error'] = str(e)
+
+    def _generate_pdf_item(self, description, company_name, company_sector, timestamp):
+        """Generate a single PDF item."""
+        # Enhanced prompt with company context
+        enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
+        
+        # Generate content using the serving endpoint
+        content = self._generate_document_content('policy_guide', enhanced_description, 1)
+        
+        # Update progress
+        self.generation_state['current_step'] = f"Creating PDF..."
+        
+        # Create filename
+        filename = f"synthetic_pdf_{timestamp}.pdf"
+        
+        # Generate PDF
+        pdf_path = self._create_pdf(content, filename, 'pdf')
+        
+        # Update progress and save to volume
+        self.generation_state['current_step'] = f"Saving PDF to volume..."
+        
+        try:
+            self._save_to_volume(pdf_path, filename)
+            save_success = True
+        except Exception as e:
+            save_success = False
+            print(f"Failed to save PDF to volume: {str(e)}")
+            # For iterative generation, we don't fail completely on volume save errors
+        
+        return {
+            'type': 'pdf',
+            'filename': filename,
+            'path': pdf_path,
+            'description': description,
+            'company_name': company_name,
+            'company_sector': company_sector,
+            'size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0,
+            'saved_to_volume': save_success
+        }
+
+    def _generate_text_item(self, description, company_name, company_sector, timestamp):
+        """Generate a text item (placeholder implementation)."""
+        self.generation_state['current_step'] = f"Generating text content..."
+        
+        # Enhanced prompt with company context
+        enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
+        
+        # For now, create a simple text file
+        filename = f"synthetic_text_{timestamp}.txt"
+        local_dir = "./generated_documents"
+        os.makedirs(local_dir, exist_ok=True)
+        text_path = os.path.join(local_dir, filename)
+        
+        with open(text_path, 'w') as f:
+            f.write(f"PLACEHOLDER TEXT DOCUMENT\n")
+            f.write(f"Company: {company_name}\n")
+            f.write(f"Sector: {company_sector}\n")
+            f.write(f"Description: {enhanced_description}\n")
+            f.write(f"Generated: {datetime.now()}\n\n")
+            f.write("This is a placeholder implementation for text generation.\n")
+            f.write("Future versions will use the LLM to generate rich text content.")
+        
+        return {
+            'type': 'text',
+            'filename': filename,
+            'path': text_path,
+            'description': description,
+            'company_name': company_name,
+            'company_sector': company_sector,
+            'size': os.path.getsize(text_path),
+            'saved_to_volume': False  # Placeholder doesn't save to volume
+        }
+
+    def _generate_tabular_item(self, description, company_name, company_sector, timestamp):
+        """Generate tabular data (placeholder implementation)."""
+        self.generation_state['current_step'] = f"Generating tabular data..."
+        
+        # For now, create a simple CSV file
+        filename = f"synthetic_tabular_{timestamp}.csv"
+        local_dir = "./generated_documents"
+        os.makedirs(local_dir, exist_ok=True)
+        csv_path = os.path.join(local_dir, filename)
+        
+        with open(csv_path, 'w') as f:
+            f.write("column1,column2,column3,company,sector,description\n")
+            f.write(f"sample_data_1,value_1,123,{company_name},{company_sector},\"{description}\"\n")
+            f.write(f"sample_data_2,value_2,456,{company_name},{company_sector},\"{description}\"\n")
+            f.write(f"sample_data_3,value_3,789,{company_name},{company_sector},\"{description}\"\n")
+        
+        return {
+            'type': 'tabular',
+            'filename': filename,
+            'path': csv_path,
+            'description': description,
+            'company_name': company_name,
+            'company_sector': company_sector,
+            'size': os.path.getsize(csv_path),
+            'saved_to_volume': False  # Placeholder doesn't save to volume
+        }
