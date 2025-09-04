@@ -264,12 +264,19 @@ Generate a complete customer profile with realistic data (use fictional informat
         prompt = doc_prompts.get(doc_type, f"Create a {doc_type} document with these characteristics: {description}")
         
         messages = [
-            {"role": "system", "content": "You are a professional document generator. Create realistic, detailed documents based on the user's specifications. Use fictional but realistic data. Make the documents comprehensive and well-structured."},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": "You are a professional document generator. Create realistic, detailed documents based on the user's specifications. Use fictional but realistic data. Make the documents comprehensive and well-structured. IMPORTANT: Return ONLY the document content itself, no reasoning, no metadata, no explanations - just the complete document text ready for PDF generation."},
+            {"role": "user", "content": prompt + "\n\nIMPORTANT: Respond with ONLY the complete document content. Do not include any reasoning, metadata, or explanations. Start directly with the document title and content."}
         ]
         
         try:
             response = query_endpoint(self.endpoint_name, messages, max_tokens=2048)
+            
+            # Debug logging to understand response structure
+            print(f"DEBUG: Raw response type: {type(response)}")
+            if isinstance(response, dict):
+                print(f"DEBUG: Response keys: {list(response.keys())}")
+                if 'type' in response:
+                    print(f"DEBUG: Response type field: {response['type']}")
             
             # Extract content using robust logic to handle different response types
             content = self._extract_content_safely(response)
@@ -465,39 +472,69 @@ Generate a complete customer profile with realistic data (use fictional informat
     def _extract_content_safely(self, response):
         """Safely extract content from various response formats."""
         if isinstance(response, dict):
+            # Handle reasoning/summary structure first
+            if response.get('type') == 'reasoning' and 'summary' in response:
+                # This is metadata, not the actual content - skip it
+                print("Detected reasoning metadata, looking for actual content...")
+                return "Content extraction failed - received metadata instead of document content"
+            
             # Try common keys in order of preference
-            for key in ["content", "summary", "text", "message"]:
+            for key in ["content", "text", "message", "summary"]:
                 if key in response:
                     value = response[key]
                     # Handle nested structures
-                    if isinstance(value, dict) and "content" in value:
-                        return value["content"]
+                    if isinstance(value, dict):
+                        if "content" in value:
+                            return value["content"]
+                        elif "text" in value:
+                            return value["text"]
+                        else:
+                            # Skip metadata objects
+                            continue
                     elif isinstance(value, list):
                         # If it's a list, try to extract content from each item
                         extracted_items = []
                         for item in value:
                             if isinstance(item, dict):
-                                if "content" in item:
+                                # Skip metadata objects like reasoning summaries
+                                if item.get('type') in ['summary_text', 'reasoning']:
+                                    continue
+                                elif "content" in item:
                                     extracted_items.append(item["content"])
                                 elif "text" in item:
                                     extracted_items.append(item["text"])
                                 else:
-                                    extracted_items.append(str(item))
+                                    # Only include if it looks like actual content
+                                    item_str = str(item)
+                                    if len(item_str) > 100 and not item_str.startswith("{'type'"):
+                                        extracted_items.append(item_str)
                             else:
                                 extracted_items.append(str(item))
                         return '\n\n'.join(extracted_items) if extracted_items else str(value)
                     else:
-                        return value
+                        # Only return string values that look like actual content
+                        value_str = str(value)
+                        if len(value_str) > 50 and not value_str.startswith("{'type'"):
+                            return value_str
             
             # If none of the expected keys exist, return string representation
-            return str(response)
+            response_str = str(response)
+            # But avoid returning obvious metadata
+            if response_str.startswith("{'type': 'reasoning'"):
+                return "Error: Received reasoning metadata instead of document content"
+            return response_str
+            
         elif isinstance(response, list):
             # If response is directly a list, extract content from each item
             extracted_items = []
             for item in response:
                 if isinstance(item, dict):
+                    # Skip metadata items
+                    if item.get('type') in ['reasoning', 'summary_text']:
+                        continue
                     content = self._extract_content_safely(item)  # Recursive call
-                    extracted_items.append(content)
+                    if content and not content.startswith("Error:") and len(content) > 50:
+                        extracted_items.append(content)
                 else:
                     extracted_items.append(str(item))
             return '\n\n'.join(extracted_items) if extracted_items else str(response)
