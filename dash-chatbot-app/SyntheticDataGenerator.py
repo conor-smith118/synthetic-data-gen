@@ -367,35 +367,37 @@ Generate a complete customer profile with realistic data (use fictional informat
         return pdf_path
 
     def _save_to_volume(self, local_path, filename):
-        """Save file to Databricks volume using direct file operations."""
-        import shutil
-        import os
-        
-        # Target volume path
-        volume_file_path = f"{self.volume_path}/{filename}"
+        """Save file to Databricks volume using WorkspaceClient pattern from cookbook."""
+        import io
+        from databricks.sdk import WorkspaceClient
         
         try:
-            # Ensure the volume directory exists
-            volume_dir = os.path.dirname(volume_file_path)
-            os.makedirs(volume_dir, exist_ok=True)
+            w = WorkspaceClient()
             
-            # Direct file copy to volume - this works when volumes are properly mounted
-            print(f"Copying {local_path} to {volume_file_path}")
-            shutil.copy2(local_path, volume_file_path)
+            # Read file into bytes
+            print(f"Reading file: {local_path}")
+            with open(local_path, "rb") as f:
+                file_bytes = f.read()
+            binary_data = io.BytesIO(file_bytes)
             
-            # Verify the copy worked
-            if os.path.exists(volume_file_path):
-                file_size = os.path.getsize(volume_file_path)
-                print(f"✅ SUCCESS: {filename} copied to volume ({file_size:,} bytes)")
-                return True
-            else:
-                print(f"❌ FAILED: File not found at {volume_file_path} after copy")
-                return False
-                
+            # Construct volume file path
+            # self.volume_path is "/Volumes/conor_smith/synthetic_data_app/synthetic_data_volume"
+            volume_file_path = f"{self.volume_path}/{filename}"
+            
+            print(f"Uploading to volume: {volume_file_path}")
+            w.files.upload(volume_file_path, binary_data, overwrite=True)
+            
+            print(f"✅ SUCCESS: {filename} uploaded to volume ({len(file_bytes):,} bytes)")
+            return True
+            
+        except ImportError as e:
+            print(f"❌ ERROR: Databricks SDK not available - {str(e)}")
+            print("Install with: pip install databricks-sdk")
+            return False
         except Exception as e:
-            print(f"❌ ERROR: Failed to copy {filename} to volume - {str(e)}")
+            print(f"❌ ERROR: Upload failed - {str(e)}")
             print(f"   Source: {local_path}")
-            print(f"   Target: {volume_file_path}")
+            print(f"   Target: {self.volume_path}/{filename}")
             return False
 
     def _format_doc_type(self, doc_type):
