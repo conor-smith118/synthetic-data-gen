@@ -278,7 +278,8 @@ class SyntheticDataGenerator:
              Input({'type': 'col-name', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
+             Input({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
             State('operations-store', 'data'),
             prevent_initial_call=True
         )
@@ -303,7 +304,7 @@ class SyntheticDataGenerator:
                 new_value = ctx.triggered[0]['value']
                 
                 # Handle column updates differently from operation updates
-                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max']:
+                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-prompt']:
                     op_id = triggered_comp['op']
                     col_id = triggered_comp['col']
                     
@@ -336,6 +337,8 @@ class SyntheticDataGenerator:
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
                                     column['max_value'] = new_value
+                                elif comp_type == 'col-prompt':
+                                    column['prompt'] = new_value
                                 
                                 # Update configured status
                                 table_name = op['config'].get('table_name', '')
@@ -432,9 +435,10 @@ class SyntheticDataGenerator:
             State({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             prevent_initial_call=True
         )
-        def add_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs):
+        def add_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs, col_prompts):
             if not operations or not any(n_clicks_list):
                 return dash.no_update
             
@@ -470,6 +474,11 @@ class SyntheticDataGenerator:
                                     col['min_value'] = col_mins[i]
                                 if col_maxs and i < len(col_maxs) and col_maxs[i] is not None:
                                     col['max_value'] = col_maxs[i]
+                            
+                            # Update prompt for GenAI Text types
+                            if col.get('data_type') == 'GenAI Text':
+                                if col_prompts and i < len(col_prompts) and col_prompts[i] is not None:
+                                    col['prompt'] = col_prompts[i]
                         break
                 
                 # Now find the operation and add a new column
@@ -484,7 +493,8 @@ class SyntheticDataGenerator:
                             'name': f"column_{len(op['config']['columns']) + 1}",
                             'data_type': 'Integer',
                             'min_value': 1,
-                            'max_value': 100
+                            'max_value': 100,
+                            'prompt': ''
                         }
                         op['config']['columns'].append(new_column)
                         
@@ -508,9 +518,10 @@ class SyntheticDataGenerator:
             State({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             prevent_initial_call=True
         )
-        def remove_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs):
+        def remove_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs, col_prompts):
             if not operations or not any(n_clicks_list):
                 return dash.no_update
             
@@ -546,6 +557,11 @@ class SyntheticDataGenerator:
                                     col['min_value'] = col_mins[i]
                                 if col_maxs and i < len(col_maxs) and col_maxs[i] is not None:
                                     col['max_value'] = col_maxs[i]
+                            
+                            # Update prompt for GenAI Text types
+                            if col.get('data_type') == 'GenAI Text':
+                                if col_prompts and i < len(col_prompts) and col_prompts[i] is not None:
+                                    col['prompt'] = col_prompts[i]
                         break
                 
                 # Now find the operation and remove the column
@@ -637,6 +653,39 @@ class SyntheticDataGenerator:
                                 debounce=True
                             )
                         ], width=6)
+                    ])
+                ]
+            elif col_type == 'GenAI Text':
+                # Get existing prompt value for this column
+                prompt_val = ""
+                
+                if operations:
+                    op_id = config_id['op']
+                    col_id = config_id['col']
+                    
+                    # Find the operation and column to get existing prompt
+                    for op in operations:
+                        if op['id'] == op_id and op['type'] == 'tabular':
+                            columns = op['config'].get('columns', [])
+                            for col in columns:
+                                if col['id'] == col_id:
+                                    prompt_val = col.get('prompt', '')
+                                    break
+                            break
+                
+                # Show prompt input for GenAI Text type
+                return [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Text Gen Prompt:", className="form-label fw-bold"),
+                            dbc.Textarea(
+                                id={'type': 'col-prompt', 'op': config_id['op'], 'col': config_id['col']},
+                                placeholder="Enter the prompt template for generating text for each row...",
+                                value=prompt_val,
+                                rows=3,
+                                debounce=True
+                            )
+                        ], width=12)
                     ])
                 ]
             else:
@@ -860,7 +909,8 @@ class SyntheticDataGenerator:
                                 options=[
                                     {'label': 'Integer', 'value': 'Integer'},
                                     {'label': 'First Name', 'value': 'First Name'},
-                                    {'label': 'Last Name', 'value': 'Last Name'}
+                                    {'label': 'Last Name', 'value': 'Last Name'},
+                                    {'label': 'GenAI Text', 'value': 'GenAI Text'}
                                 ],
                                 value=col_type,
                                 style={'font-size': '14px'}
@@ -1743,12 +1793,40 @@ Please incorporate this company information naturally throughout the document to
                     data_gen = data_gen.withColumn(col_name, text=fakerText("first_name"))
                 elif col_type == 'Last Name':
                     data_gen = data_gen.withColumn(col_name, text=fakerText("last_name"))
+                elif col_type == 'GenAI Text':
+                    # For GenAI Text, we'll add it after the DataFrame is created
+                    # as it requires using ai_query with existing columns
+                    data_gen = data_gen.withColumn(col_name, "string", values=[""])
             
             # Only include user-specified columns (no automatic company columns)
             
             # Generate the DataFrame
             self.generation_state['current_step'] = f"Building DataFrame with {row_count} rows..."
             df = data_gen.build()
+            
+            # Process GenAI Text columns with ai_query
+            for col in columns:
+                col_name = col.get('name', 'unnamed_column')
+                col_type = col.get('data_type', 'Integer')
+                
+                if col_type == 'GenAI Text':
+                    prompt_template = col.get('prompt', '')
+                    if prompt_template:
+                        self.generation_state['current_step'] = f"Generating AI text for column '{col_name}'..."
+                        
+                        # Use ai_query to generate text based on the prompt
+                        from pyspark.sql.functions import expr
+                        
+                        df = df.withColumn(
+                            col_name,
+                            expr(
+                                "ai_query("
+                                f"'{self.endpoint_name}', "
+                                f"request => '{prompt_template}', "
+                                "params => map('temperature', 0.9, 'top_p', 0.95)"
+                                ")"
+                            )
+                        )
             
             # Show first 5 rows for preview
             self.generation_state['current_step'] = f"Collecting preview data..."
@@ -1816,11 +1894,59 @@ Please incorporate this company information naturally throughout the document to
                     data[col_name] = [fake.first_name() for _ in range(row_count)]
                 elif col_type == 'Last Name':
                     data[col_name] = [fake.last_name() for _ in range(row_count)]
+                elif col_type == 'GenAI Text':
+                    # For GenAI Text, initially fill with placeholder
+                    # We'll update these after the DataFrame is created
+                    prompt_template = col.get('prompt', '')
+                    if prompt_template:
+                        data[col_name] = [f"GenAI_Placeholder_{i}" for i in range(row_count)]
+                    else:
+                        data[col_name] = [""] * row_count
             
             # Only include user-specified columns (no automatic company columns)
             
             # Create DataFrame
             df = pd.DataFrame(data)
+            
+            # Process GenAI Text columns by calling the LLM endpoint
+            from model_serving_utils import query_endpoint
+            
+            for col in columns:
+                col_name = col.get('name', 'unnamed_column')
+                col_type = col.get('data_type', 'Integer')
+                
+                if col_type == 'GenAI Text':
+                    prompt_template = col.get('prompt', '')
+                    if prompt_template:
+                        self.generation_state['current_step'] = f"Generating AI text for column '{col_name}'..."
+                        
+                        # Generate text for each row (for fallback, we'll limit to reasonable amounts)
+                        ai_texts = []
+                        batch_size = min(10, row_count)  # Limit API calls for fallback
+                        
+                        for i in range(min(batch_size, row_count)):
+                            try:
+                                # Use the LLM endpoint to generate text
+                                messages = [{"role": "user", "content": prompt_template}]
+                                response = query_endpoint(self.endpoint_name, messages, 200)
+                                
+                                # Extract content from response
+                                if hasattr(response, 'get'):
+                                    ai_text = response.get('content', str(response))
+                                else:
+                                    ai_text = str(response)
+                                
+                                ai_texts.append(ai_text)
+                            except Exception as e:
+                                print(f"Error generating AI text for row {i}: {str(e)}")
+                                ai_texts.append(f"Error generating text: {str(e)}")
+                        
+                        # Fill remaining rows with the last generated text (for demo purposes)
+                        while len(ai_texts) < row_count:
+                            ai_texts.append(ai_texts[-1] if ai_texts else "No text generated")
+                        
+                        # Update the DataFrame column
+                        df[col_name] = ai_texts[:row_count]
             
             # Save to CSV
             filename = f"{table_name}_{timestamp}.csv"
