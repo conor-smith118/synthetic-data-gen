@@ -304,7 +304,7 @@ class SyntheticDataGenerator:
                 new_value = ctx.triggered[0]['value']
                 
                 # Handle column updates differently from operation updates
-                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-prompt']:
+                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-prompt', 'col-max-tokens']:
                     op_id = triggered_comp['op']
                     col_id = triggered_comp['col']
                     
@@ -336,12 +336,16 @@ class SyntheticDataGenerator:
                                     elif new_value == 'GenAI Text':
                                         if 'prompt' not in column:
                                             column['prompt'] = ''
+                                        if 'max_tokens' not in column:
+                                            column['max_tokens'] = 1000
                                 elif comp_type == 'col-min':
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
                                     column['max_value'] = new_value
                                 elif comp_type == 'col-prompt':
                                     column['prompt'] = new_value
+                                elif comp_type == 'col-max-tokens':
+                                    column['max_tokens'] = new_value
                                 
                                 # Update configured status
                                 table_name = op['config'].get('table_name', '')
@@ -439,9 +443,10 @@ class SyntheticDataGenerator:
             State({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-max-tokens', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             prevent_initial_call=True
         )
-        def add_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs, col_prompts):
+        def add_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs, col_prompts, col_max_tokens):
             if not operations or not any(n_clicks_list):
                 return dash.no_update
             
@@ -480,6 +485,8 @@ class SyntheticDataGenerator:
                                 elif new_type == 'GenAI Text':
                                     if 'prompt' not in col:
                                         col['prompt'] = ''
+                                    if 'max_tokens' not in col:
+                                        col['max_tokens'] = 1000
                             
                             # Update min/max values for Integer types
                             if col.get('data_type') == 'Integer':
@@ -488,10 +495,12 @@ class SyntheticDataGenerator:
                                 if col_maxs and i < len(col_maxs) and col_maxs[i] is not None:
                                     col['max_value'] = col_maxs[i]
                             
-                            # Update prompt for GenAI Text types
+                            # Update prompt and max_tokens for GenAI Text types
                             if col.get('data_type') == 'GenAI Text':
                                 if col_prompts and i < len(col_prompts) and col_prompts[i] is not None:
                                     col['prompt'] = col_prompts[i]
+                                if col_max_tokens and i < len(col_max_tokens) and col_max_tokens[i] is not None:
+                                    col['max_tokens'] = col_max_tokens[i]
                         break
                 
                 # Now find the operation and add a new column
@@ -507,7 +516,8 @@ class SyntheticDataGenerator:
                             'data_type': 'Integer',
                             'min_value': 1,
                             'max_value': 100,
-                            'prompt': ''
+                            'prompt': '',
+                            'max_tokens': 1000
                         }
                         op['config']['columns'].append(new_column)
                         
@@ -532,9 +542,10 @@ class SyntheticDataGenerator:
             State({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             State({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-max-tokens', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             prevent_initial_call=True
         )
-        def remove_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs, col_prompts):
+        def remove_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs, col_prompts, col_max_tokens):
             if not operations or not any(n_clicks_list):
                 return dash.no_update
             
@@ -573,6 +584,8 @@ class SyntheticDataGenerator:
                                 elif new_type == 'GenAI Text':
                                     if 'prompt' not in col:
                                         col['prompt'] = ''
+                                    if 'max_tokens' not in col:
+                                        col['max_tokens'] = 1000
                             
                             # Update min/max values for Integer types
                             if col.get('data_type') == 'Integer':
@@ -581,10 +594,12 @@ class SyntheticDataGenerator:
                                 if col_maxs and i < len(col_maxs) and col_maxs[i] is not None:
                                     col['max_value'] = col_maxs[i]
                             
-                            # Update prompt for GenAI Text types
+                            # Update prompt and max_tokens for GenAI Text types
                             if col.get('data_type') == 'GenAI Text':
                                 if col_prompts and i < len(col_prompts) and col_prompts[i] is not None:
                                     col['prompt'] = col_prompts[i]
+                                if col_max_tokens and i < len(col_max_tokens) and col_max_tokens[i] is not None:
+                                    col['max_tokens'] = col_max_tokens[i]
                         break
                 
                 # Now find the operation and remove the column
@@ -686,17 +701,19 @@ class SyntheticDataGenerator:
                     op_id = config_id['op']
                     col_id = config_id['col']
                     
-                    # Find the operation and column to get existing prompt
+                    # Find the operation and column to get existing prompt and max_tokens
+                    max_tokens_val = 1000  # Default value
                     for op in operations:
                         if op['id'] == op_id and op['type'] == 'tabular':
                             columns = op['config'].get('columns', [])
                             for col in columns:
                                 if col['id'] == col_id:
                                     prompt_val = col.get('prompt', '')
+                                    max_tokens_val = col.get('max_tokens', 1000)
                                     break
                             break
                 
-                # Show prompt input for GenAI Text type
+                # Show prompt and max_tokens inputs for GenAI Text type
                 return [
                     dbc.Row([
                         dbc.Col([
@@ -709,6 +726,21 @@ class SyntheticDataGenerator:
                                 debounce=True
                             )
                         ], width=12)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Max Tokens:", className="form-label fw-bold"),
+                            dbc.Input(
+                                id={'type': 'col-max-tokens', 'op': config_id['op'], 'col': config_id['col']},
+                                type="number",
+                                placeholder="500-5000",
+                                min=500,
+                                max=5000,
+                                value=max_tokens_val,
+                                size="sm",
+                                debounce=True
+                            )
+                        ], width=6)
                     ])
                 ]
             else:
@@ -922,6 +954,21 @@ class SyntheticDataGenerator:
                                 debounce=True
                             )
                         ], width=12)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Max Tokens:", className="form-label fw-bold"),
+                            dbc.Input(
+                                id={'type': 'col-max-tokens', 'op': op_id, 'col': col_id},
+                                type="number",
+                                placeholder="500-5000",
+                                min=500,
+                                max=5000,
+                                value=col.get('max_tokens', 1000),
+                                size="sm",
+                                debounce=True
+                            )
+                        ], width=6)
                     ])
                 ]
             else:
@@ -1529,17 +1576,43 @@ Generate a complete customer profile with realistic data (use fictional informat
         elif isinstance(response, list):
             # If response is directly a list, extract content from each item
             extracted_items = []
+            reasoning_content = None
+            
             for item in response:
                 if isinstance(item, dict):
-                    # Skip metadata items
-                    if item.get('type') in ['reasoning', 'summary_text']:
-                        continue
-                    content = self._extract_content_safely(item)  # Recursive call
-                    if content and not content.startswith("Error:") and len(content) > 50:
-                        extracted_items.append(content)
+                    # Look for actual text content first
+                    if item.get('type') == 'text' and 'text' in item:
+                        extracted_items.append(item['text'])
+                    elif item.get('type') == 'reasoning' and 'summary' in item:
+                        # If we only have reasoning, try to extract useful content from it
+                        summary = item['summary']
+                        if isinstance(summary, list):
+                            for summary_item in summary:
+                                if isinstance(summary_item, dict) and 'text' in summary_item:
+                                    summary_text = summary_item['text']
+                                    # Look for quoted content that might be the intended response
+                                    import re
+                                    quotes = re.findall(r'"([^"]+)"', summary_text)
+                                    for quote in quotes:
+                                        if len(quote) > 30 and not quote.startswith("Give me"):
+                                            reasoning_content = quote
+                                            break
+                    else:
+                        # Try recursive extraction for other types
+                        content = self._extract_content_safely(item)
+                        if content and not content.startswith("Error:") and len(content) > 50:
+                            extracted_items.append(content)
                 else:
                     extracted_items.append(str(item))
-            return '\n\n'.join(extracted_items) if extracted_items else str(response)
+            
+            # If we found actual content, use that
+            if extracted_items:
+                return '\n\n'.join(extracted_items)
+            # Otherwise, fall back to reasoning content if available
+            elif reasoning_content:
+                return reasoning_content
+            else:
+                return "Error: Unable to extract usable content from LLM response"
         else:
             return str(response)
 
@@ -1859,6 +1932,9 @@ Please incorporate this company information naturally throughout the document to
                         # Escape single quotes for SQL safety
                         safe_prompt = enhanced_prompt.replace("'", "\\'")
                         
+                        # Get max_tokens from column config (default 1000 if not specified)
+                        max_tokens = col.get('max_tokens', 1000)
+                        
                         # Use ai_query to generate text based on the prompt
                         from pyspark.sql.functions import expr
                         
@@ -1868,7 +1944,7 @@ Please incorporate this company information naturally throughout the document to
                                 "ai_query("
                                 f"'{self.endpoint_name}', "
                                 f"request => '{safe_prompt}', "
-                                "params => map('temperature', 0.9, 'top_p', 0.95)"
+                                f"params => map('temperature', 0.9, 'top_p', 0.95, 'max_tokens', {max_tokens})"
                                 ")"
                             )
                         )
@@ -1974,12 +2050,17 @@ Please incorporate this company information naturally throughout the document to
                                 # Add table formatting note to the prompt
                                 enhanced_prompt = f"{prompt_template} Note: This will be text data in a table so omit all special formatting."
                                 
-                                # Use the LLM endpoint to generate text
+                                # Use the LLM endpoint to generate text with higher token limit
                                 messages = [{"role": "user", "content": enhanced_prompt}]
-                                response = query_endpoint(self.endpoint_name, messages, 200)
+                                response = query_endpoint(self.endpoint_name, messages, 500)
+                                
+                                # Debug: log the raw response structure
+                                print(f"GenAI Text Debug - Raw response type: {type(response)}")
+                                print(f"GenAI Text Debug - Response preview: {str(response)[:200]}...")
                                 
                                 # Extract clean content from response using existing method
                                 ai_text = self._extract_content_safely(response)
+                                print(f"GenAI Text Debug - Extracted text: {ai_text[:100]}...")
                                 
                                 ai_texts.append(ai_text)
                             except Exception as e:
