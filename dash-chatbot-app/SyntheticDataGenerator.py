@@ -14,6 +14,7 @@ from databricks.sdk import WorkspaceClient
 import threading
 import io
 from docx import Document
+from dbldatagen import DataGenerator, fakerText
 
 class SyntheticDataGenerator:
     def __init__(self, app, endpoint_name):
@@ -272,8 +273,7 @@ class SyntheticDataGenerator:
              Input({'type': 'text-doc-type', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-format', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-count', 'index': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'tabular-description', 'index': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'tabular-type', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'tabular-name', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'tabular-rows', 'index': dash.dependencies.ALL}, 'value')],
             State('operations-store', 'data'),
             prevent_initial_call=True
@@ -320,16 +320,21 @@ class SyntheticDataGenerator:
                             op['config']['file_format'] = new_value
                         elif comp_type == 'text-count':
                             op['config']['count'] = new_value
-                        elif comp_type == 'tabular-description':
-                            op['config']['description'] = new_value
-                        elif comp_type == 'tabular-type':
-                            op['config']['data_type'] = new_value
+                        elif comp_type == 'tabular-name':
+                            op['config']['table_name'] = new_value
                         elif comp_type == 'tabular-rows':
                             op['config']['row_count'] = new_value
                         
-                        # Mark as configured if description is provided
-                        description = op['config'].get('description', '')
-                        op['configured'] = bool(description and description.strip())
+                        # Mark as configured based on operation type
+                        if op['type'] == 'tabular':
+                            # For tabular operations, require table name and at least one column
+                            table_name = op['config'].get('table_name', '')
+                            columns = op['config'].get('columns', [])
+                            op['configured'] = bool(table_name and table_name.strip() and len(columns) > 0)
+                        else:
+                            # For other operations, require description
+                            description = op['config'].get('description', '')
+                            op['configured'] = bool(description and description.strip())
                         break
                 
                 return operations
@@ -371,6 +376,114 @@ class SyntheticDataGenerator:
             except Exception as e:
                 print(f"Error removing operation: {str(e)}")
                 return dash.no_update
+        
+        # Add column callback
+        @self.app.callback(
+            Output('operations-store', 'data', allow_duplicate=True),
+            Input({'type': 'add-column', 'index': dash.dependencies.ALL}, 'n_clicks'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def add_column(n_clicks_list, operations):
+            if not operations or not any(n_clicks_list):
+                return dash.no_update
+            
+            ctx = callback_context
+            if not ctx.triggered:
+                return dash.no_update
+            
+            try:
+                import json
+                triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                triggered_comp = json.loads(triggered_id)
+                op_id = triggered_comp['index']
+                
+                # Find the operation and add a new column
+                for op in operations:
+                    if op['id'] == op_id and op['type'] == 'tabular':
+                        if 'columns' not in op['config']:
+                            op['config']['columns'] = []
+                        
+                        # Create new column with unique ID
+                        new_column = {
+                            'id': f"col_{len(op['config']['columns'])}_{int(time.time())}",
+                            'name': f"column_{len(op['config']['columns']) + 1}",
+                            'data_type': 'Integer',
+                            'min_value': 1,
+                            'max_value': 100
+                        }
+                        op['config']['columns'].append(new_column)
+                        
+                        # Update configured status
+                        table_name = op['config'].get('table_name', '')
+                        op['configured'] = bool(table_name and table_name.strip() and len(op['config']['columns']) > 0)
+                        break
+                
+                return operations
+                
+            except Exception as e:
+                print(f"Error adding column: {str(e)}")
+                return dash.no_update
+        
+        # Remove column callback
+        @self.app.callback(
+            Output('operations-store', 'data', allow_duplicate=True),
+            Input({'type': 'remove-column', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'n_clicks'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def remove_column(n_clicks_list, operations):
+            if not operations or not any(n_clicks_list):
+                return dash.no_update
+            
+            ctx = callback_context
+            if not ctx.triggered:
+                return dash.no_update
+            
+            try:
+                import json
+                triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                triggered_comp = json.loads(triggered_id)
+                op_id = triggered_comp['op']
+                col_id = triggered_comp['col']
+                
+                # Find the operation and remove the column
+                for op in operations:
+                    if op['id'] == op_id and op['type'] == 'tabular':
+                        if 'columns' in op['config']:
+                            op['config']['columns'] = [col for col in op['config']['columns'] if col['id'] != col_id]
+                            
+                            # Update configured status
+                            table_name = op['config'].get('table_name', '')
+                            op['configured'] = bool(table_name and table_name.strip() and len(op['config']['columns']) > 0)
+                        break
+                
+                return operations
+                
+            except Exception as e:
+                print(f"Error removing column: {str(e)}")
+                return dash.no_update
+        
+        # Update columns container callback
+        @self.app.callback(
+            Output({'type': 'columns-container', 'index': dash.dependencies.MATCH}, 'children'),
+            Input('operations-store', 'data'),
+            State({'type': 'columns-container', 'index': dash.dependencies.MATCH}, 'id'),
+            prevent_initial_call=True
+        )
+        def update_columns_container(operations, container_id):
+            if not operations:
+                return []
+            
+            op_id = container_id['index']
+            
+            # Find the matching operation
+            for op in operations:
+                if op['id'] == op_id and op['type'] == 'tabular':
+                    columns = op['config'].get('columns', [])
+                    return self._create_column_cards(columns, op_id)
+            
+            return []
 
     def _create_operation_card(self, operation):
         """Create a card for configuring an operation."""
@@ -456,36 +569,49 @@ class SyntheticDataGenerator:
             ]
         elif op_type == 'tabular':
             config_inputs = [
-                html.Label("Data Type:", className="form-label fw-bold"),
-                dcc.Dropdown(
-                    id={'type': 'tabular-type', 'index': op_id},
-                    options=[
-                        {'label': 'Customer Data', 'value': 'customers'},
-                        {'label': 'Sales Data', 'value': 'sales'},
-                        {'label': 'Product Data', 'value': 'products'},
-                        {'label': 'Employee Data', 'value': 'employees'}
-                    ],
-                    value=config.get('data_type', 'customers'),
-                    className="mb-3"
-                ),
-                html.Label("Description:", className="form-label fw-bold"),
-                dbc.Textarea(
-                    id={'type': 'tabular-description', 'index': op_id},
-                    placeholder="Describe the tabular data you want to generate...",
-                    value=config.get('description', ''),
-                    rows=3,
+                html.Label("Table Name:", className="form-label fw-bold"),
+                dbc.Input(
+                    id={'type': 'tabular-name', 'index': op_id},
+                    placeholder="Enter table name...",
+                    value=config.get('table_name', ''),
                     className="mb-3"
                 ),
                 html.Label("Number of Rows:", className="form-label fw-bold"),
                 dcc.Slider(
                     id={'type': 'tabular-rows', 'index': op_id},
-                    min=10,
-                    max=1000,
-                    step=10,
-                    value=config.get('row_count', 100),
-                    marks={i: str(i) for i in range(10, 1001, 200)},
+                    min=1,
+                    max=50000,
+                    step=1,
+                    value=config.get('row_count', 1000),
+                    marks={
+                        1: '1',
+                        100: '100',
+                        1000: '1K',
+                        5000: '5K',
+                        10000: '10K',
+                        25000: '25K',
+                        50000: '50K'
+                    },
+                    tooltip={"placement": "bottom", "always_visible": True},
                     className="mb-3"
-                )
+                ),
+                html.Div([
+                    html.Div([
+                        html.Label("Columns:", className="form-label fw-bold"),
+                        dbc.Button(
+                            "Add Column",
+                            id={'type': 'add-column', 'index': op_id},
+                            color="primary",
+                            size="sm",
+                            className="float-end"
+                        )
+                    ], className="d-flex justify-content-between align-items-center mb-3"),
+                    html.Div(
+                        id={'type': 'columns-container', 'index': op_id},
+                        children=self._create_column_cards(config.get('columns', []), op_id),
+                        className="mb-3"
+                    )
+                ])
             ]
         else:
             config_inputs = [html.P("Unknown operation type")]
@@ -512,6 +638,86 @@ class SyntheticDataGenerator:
             ]),
             dbc.CardBody(config_inputs)
         ], className="mb-3")
+
+    def _create_column_cards(self, columns, op_id):
+        """Create cards for column configuration within a tabular operation."""
+        if not columns:
+            return []
+        
+        column_cards = []
+        for i, col in enumerate(columns):
+            col_id = col.get('id', f"col_{i}")
+            col_name = col.get('name', '')
+            col_type = col.get('data_type', 'Integer')
+            
+            # Create type-specific configuration inputs
+            type_inputs = []
+            if col_type == 'Integer':
+                type_inputs = [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Min Value:", className="form-label"),
+                            dbc.Input(
+                                id={'type': 'col-min', 'op': op_id, 'col': col_id},
+                                type="number",
+                                value=col.get('min_value', 1),
+                                size="sm"
+                            )
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Max Value:", className="form-label"),
+                            dbc.Input(
+                                id={'type': 'col-max', 'op': op_id, 'col': col_id},
+                                type="number",
+                                value=col.get('max_value', 100),
+                                size="sm"
+                            )
+                        ], width=6)
+                    ])
+                ]
+            
+            card = dbc.Card([
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Column Name:", className="form-label"),
+                            dbc.Input(
+                                id={'type': 'col-name', 'op': op_id, 'col': col_id},
+                                value=col_name,
+                                size="sm",
+                                placeholder="Enter column name..."
+                            )
+                        ], width=4),
+                        dbc.Col([
+                            html.Label("Data Type:", className="form-label"),
+                            dcc.Dropdown(
+                                id={'type': 'col-type', 'op': op_id, 'col': col_id},
+                                options=[
+                                    {'label': 'Integer', 'value': 'Integer'},
+                                    {'label': 'First Name', 'value': 'First Name'},
+                                    {'label': 'Last Name', 'value': 'Last Name'}
+                                ],
+                                value=col_type,
+                                style={'font-size': '14px'}
+                            )
+                        ], width=6),
+                        dbc.Col([
+                            dbc.Button(
+                                "Remove",
+                                id={'type': 'remove-column', 'op': op_id, 'col': col_id},
+                                color="danger",
+                                size="sm",
+                                className="mt-4"
+                            )
+                        ], width=2)
+                    ], className="mb-2"),
+                    html.Div(type_inputs, id={'type': 'col-config', 'op': op_id, 'col': col_id})
+                ])
+            ], size="sm", className="mb-2")
+            
+            column_cards.append(card)
+        
+        return column_cards
 
     def _generate_batch_background(self, operations, company_name, company_sector):
         """Generate multiple operations in background thread."""
@@ -589,16 +795,19 @@ class SyntheticDataGenerator:
         return items
 
     def _process_tabular_operation(self, operation, company_name, company_sector):
-        """Process a tabular data generation operation (placeholder)."""
+        """Process a tabular data generation operation using dbldatagen."""
         config = operation.get('config', {})
-        data_type = config.get('data_type', 'customers')
-        description = config.get('description', 'Sample data')
-        row_count = config.get('row_count', 100)
+        table_name = config.get('table_name', 'sample_table')
+        row_count = config.get('row_count', 1000)
+        columns = config.get('columns', [])
+        
+        if not columns:
+            # If no columns configured, skip this operation
+            return None
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        enhanced_description = f"For {company_name} (a {company_sector} company): {description} ({row_count} rows)"
         
-        return self._generate_tabular_item(enhanced_description, company_name, company_sector, timestamp)
+        return self._generate_tabular_item(table_name, row_count, columns, company_name, company_sector, timestamp)
 
     def _generate_documents_background(self, doc_type, description, count):
         """Generate documents in background thread with progress updates."""
@@ -1330,29 +1539,169 @@ Please incorporate this company information naturally throughout the document to
                 'size': 0
             }
 
-    def _generate_tabular_item(self, description, company_name, company_sector, timestamp):
-        """Generate tabular data (placeholder implementation)."""
-        self.generation_state['current_step'] = f"Generating tabular data..."
-        
-        # For now, create a simple CSV file
-        filename = f"synthetic_tabular_{timestamp}.csv"
-        local_dir = "./generated_documents"
-        os.makedirs(local_dir, exist_ok=True)
-        csv_path = os.path.join(local_dir, filename)
-        
-        with open(csv_path, 'w') as f:
-            f.write("column1,column2,column3,company,sector,description\n")
-            f.write(f"sample_data_1,value_1,123,{company_name},{company_sector},\"{description}\"\n")
-            f.write(f"sample_data_2,value_2,456,{company_name},{company_sector},\"{description}\"\n")
-            f.write(f"sample_data_3,value_3,789,{company_name},{company_sector},\"{description}\"\n")
-        
-        return {
-            'type': 'tabular',
-            'filename': filename,
-            'path': csv_path,
-            'description': description,
-            'company_name': company_name,
-            'company_sector': company_sector,
-            'size': os.path.getsize(csv_path),
-            'saved_to_volume': False  # Placeholder doesn't save to volume
-        }
+    def _generate_tabular_item(self, table_name, row_count, columns, company_name, company_sector, timestamp):
+        """Generate tabular data using dbldatagen."""
+        try:
+            self.generation_state['current_step'] = f"Generating {row_count} rows of tabular data..."
+            
+            # Get or create Spark session - try to get existing session first
+            try:
+                from pyspark.sql import SparkSession
+                spark = SparkSession.getActiveSession()
+                if spark is None:
+                    # Create a new Spark session if none exists
+                    spark = SparkSession.builder \
+                        .appName("SyntheticDataGenerator") \
+                        .config("spark.sql.shuffle.partitions", "8") \
+                        .getOrCreate()
+            except ImportError:
+                # If PySpark is not available, create a simple CSV as fallback
+                return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
+            
+            # Set partition parameters
+            partitions_requested = min(8, max(1, row_count // 1000))  # 1 partition per 1000 rows, max 8
+            spark.conf.set("spark.sql.shuffle.partitions", str(partitions_requested))
+            
+            # Create DataGenerator
+            data_gen = DataGenerator(spark, rows=row_count, partitions=partitions_requested)
+            
+            # Add columns based on configuration
+            for col in columns:
+                col_name = col.get('name', 'unnamed_column')
+                col_type = col.get('data_type', 'Integer')
+                
+                if col_type == 'Integer':
+                    min_val = col.get('min_value', 1)
+                    max_val = col.get('max_value', 100)
+                    data_gen = data_gen.withColumn(col_name, "integer", minValue=min_val, maxValue=max_val)
+                elif col_type == 'First Name':
+                    data_gen = data_gen.withColumn(col_name, text=fakerText("first_name"))
+                elif col_type == 'Last Name':
+                    data_gen = data_gen.withColumn(col_name, text=fakerText("last_name"))
+            
+            # Add company context columns
+            data_gen = data_gen.withColumn("company_name", "string", values=[company_name])
+            data_gen = data_gen.withColumn("company_sector", "string", values=[company_sector])
+            
+            # Generate the DataFrame
+            self.generation_state['current_step'] = f"Building DataFrame with {row_count} rows..."
+            df = data_gen.build()
+            
+            # Show first 5 rows for preview
+            self.generation_state['current_step'] = f"Collecting preview data..."
+            preview_data = df.limit(5).toPandas()
+            
+            # Save to CSV
+            filename = f"{table_name}_{timestamp}.csv"
+            local_dir = "./generated_documents"
+            os.makedirs(local_dir, exist_ok=True)
+            csv_path = os.path.join(local_dir, filename)
+            
+            self.generation_state['current_step'] = f"Saving to CSV file..."
+            # Convert full dataset to Pandas and save
+            pandas_df = df.toPandas()
+            pandas_df.to_csv(csv_path, index=False)
+            
+            # Save to volume
+            self.generation_state['current_step'] = f"Saving CSV to volume..."
+            volume_success = self._save_to_volume(csv_path, filename)
+            
+            return {
+                'type': 'tabular',
+                'table_name': table_name,
+                'filename': filename,
+                'path': csv_path,
+                'row_count': row_count,
+                'column_count': len(columns) + 2,  # +2 for company columns
+                'columns': [col.get('name', 'unnamed') for col in columns] + ['company_name', 'company_sector'],
+                'preview_data': preview_data.to_html(classes='table table-striped table-sm', index=False) if not preview_data.empty else "No preview available",
+                'timestamp': timestamp,
+                'company_name': company_name,
+                'company_sector': company_sector,
+                'size': os.path.getsize(csv_path) if os.path.exists(csv_path) else 0,
+                'saved_to_volume': volume_success
+            }
+            
+        except Exception as e:
+            print(f"Error generating tabular data: {str(e)}")
+            # Fallback to simple CSV generation
+            return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
+
+    def _generate_tabular_fallback(self, table_name, row_count, columns, company_name, company_sector, timestamp):
+        """Fallback method to generate tabular data without Spark."""
+        try:
+            import pandas as pd
+            import random
+            from faker import Faker
+            fake = Faker()
+            
+            self.generation_state['current_step'] = f"Generating {row_count} rows (fallback mode)..."
+            
+            # Create data dictionary
+            data = {}
+            
+            # Generate data for each column
+            for col in columns:
+                col_name = col.get('name', 'unnamed_column')
+                col_type = col.get('data_type', 'Integer')
+                
+                if col_type == 'Integer':
+                    min_val = col.get('min_value', 1)
+                    max_val = col.get('max_value', 100)
+                    data[col_name] = [random.randint(min_val, max_val) for _ in range(row_count)]
+                elif col_type == 'First Name':
+                    data[col_name] = [fake.first_name() for _ in range(row_count)]
+                elif col_type == 'Last Name':
+                    data[col_name] = [fake.last_name() for _ in range(row_count)]
+            
+            # Add company context columns
+            data['company_name'] = [company_name] * row_count
+            data['company_sector'] = [company_sector] * row_count
+            
+            # Create DataFrame
+            df = pd.DataFrame(data)
+            
+            # Save to CSV
+            filename = f"{table_name}_{timestamp}.csv"
+            local_dir = "./generated_documents"
+            os.makedirs(local_dir, exist_ok=True)
+            csv_path = os.path.join(local_dir, filename)
+            
+            df.to_csv(csv_path, index=False)
+            
+            # Get preview (first 5 rows)
+            preview_data = df.head(5)
+            
+            # Save to volume
+            volume_success = self._save_to_volume(csv_path, filename)
+            
+            return {
+                'type': 'tabular',
+                'table_name': table_name,
+                'filename': filename,
+                'path': csv_path,
+                'row_count': row_count,
+                'column_count': len(columns) + 2,
+                'columns': [col.get('name', 'unnamed') for col in columns] + ['company_name', 'company_sector'],
+                'preview_data': preview_data.to_html(classes='table table-striped table-sm', index=False),
+                'timestamp': timestamp,
+                'company_name': company_name,
+                'company_sector': company_sector,
+                'size': os.path.getsize(csv_path),
+                'saved_to_volume': volume_success
+            }
+            
+        except Exception as e:
+            print(f"Error in fallback tabular generation: {str(e)}")
+            return {
+                'type': 'tabular',
+                'table_name': table_name,
+                'filename': f"error_{timestamp}.csv",
+                'error': str(e),
+                'timestamp': timestamp,
+                'company_name': company_name,
+                'company_sector': company_sector,
+                'saved_to_volume': False,
+                'path': None,
+                'size': 0
+            }
