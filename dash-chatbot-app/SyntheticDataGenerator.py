@@ -568,7 +568,8 @@ class SyntheticDataGenerator:
                                 id={'type': 'col-min', 'op': config_id['op'], 'col': config_id['col']},
                                 type="number",
                                 value=min_val,
-                                size="sm"
+                                size="sm",
+                                debounce=True
                             )
                         ], width=6),
                         dbc.Col([
@@ -577,7 +578,8 @@ class SyntheticDataGenerator:
                                 id={'type': 'col-max', 'op': config_id['op'], 'col': config_id['col']},
                                 type="number",
                                 value=max_val,
-                                size="sm"
+                                size="sm",
+                                debounce=True
                             )
                         ], width=6)
                     ])
@@ -613,6 +615,7 @@ class SyntheticDataGenerator:
                     placeholder="Describe the PDF document you want to generate...",
                     value=config.get('description', ''),
                     rows=3,
+                    debounce=True,
                     className="mb-3"
                 ),
                 html.Label("Number of Documents:", className="form-label fw-bold"),
@@ -655,6 +658,7 @@ class SyntheticDataGenerator:
                     placeholder="Describe the text document you want to generate...",
                     value=config.get('description', ''),
                     rows=3,
+                    debounce=True,
                     className="mb-3"
                 ),
                 html.Label("Number of Documents:", className="form-label fw-bold"),
@@ -675,6 +679,7 @@ class SyntheticDataGenerator:
                     id={'type': 'tabular-name', 'index': op_id},
                     placeholder="Enter table name...",
                     value=config.get('table_name', ''),
+                    debounce=True,
                     className="mb-3"
                 ),
                 html.Label("Number of Rows:", className="form-label fw-bold"),
@@ -761,7 +766,8 @@ class SyntheticDataGenerator:
                                 id={'type': 'col-min', 'op': op_id, 'col': col_id},
                                 type="number",
                                 value=col.get('min_value', 1),
-                                size="sm"
+                                size="sm",
+                                debounce=True
                             )
                         ], width=6),
                         dbc.Col([
@@ -770,7 +776,8 @@ class SyntheticDataGenerator:
                                 id={'type': 'col-max', 'op': op_id, 'col': col_id},
                                 type="number",
                                 value=col.get('max_value', 100),
-                                size="sm"
+                                size="sm",
+                                debounce=True
                             )
                         ], width=6)
                     ])
@@ -787,6 +794,7 @@ class SyntheticDataGenerator:
                                 id={'type': 'col-name', 'op': op_id, 'col': col_id},
                                 value=col_name,
                                 size="sm",
+                                debounce=True,
                                 placeholder="Enter column name..."
                             )
                         ], width=4),
@@ -1681,9 +1689,7 @@ Please incorporate this company information naturally throughout the document to
                 elif col_type == 'Last Name':
                     data_gen = data_gen.withColumn(col_name, text=fakerText("last_name"))
             
-            # Add company context columns
-            data_gen = data_gen.withColumn("company_name", "string", values=[company_name])
-            data_gen = data_gen.withColumn("company_sector", "string", values=[company_sector])
+            # Only include user-specified columns (no automatic company columns)
             
             # Generate the DataFrame
             self.generation_state['current_step'] = f"Building DataFrame with {row_count} rows..."
@@ -1714,8 +1720,8 @@ Please incorporate this company information naturally throughout the document to
                 'filename': filename,
                 'path': csv_path,
                 'row_count': row_count,
-                'column_count': len(columns) + 2,  # +2 for company columns
-                'columns': [col.get('name', 'unnamed') for col in columns] + ['company_name', 'company_sector'],
+                'column_count': len(columns),
+                'columns': [col.get('name', 'unnamed') for col in columns],
                 'preview_data': preview_data.to_html(classes='table table-striped table-sm', index=False) if not preview_data.empty else "No preview available",
                 'timestamp': timestamp,
                 'company_name': company_name,
@@ -1756,9 +1762,7 @@ Please incorporate this company information naturally throughout the document to
                 elif col_type == 'Last Name':
                     data[col_name] = [fake.last_name() for _ in range(row_count)]
             
-            # Add company context columns
-            data['company_name'] = [company_name] * row_count
-            data['company_sector'] = [company_sector] * row_count
+            # Only include user-specified columns (no automatic company columns)
             
             # Create DataFrame
             df = pd.DataFrame(data)
@@ -1783,8 +1787,8 @@ Please incorporate this company information naturally throughout the document to
                 'filename': filename,
                 'path': csv_path,
                 'row_count': row_count,
-                'column_count': len(columns) + 2,
-                'columns': [col.get('name', 'unnamed') for col in columns] + ['company_name', 'company_sector'],
+                'column_count': len(columns),
+                'columns': [col.get('name', 'unnamed') for col in columns],
                 'preview_data': preview_data.to_html(classes='table table-striped table-sm', index=False),
                 'timestamp': timestamp,
                 'company_name': company_name,
