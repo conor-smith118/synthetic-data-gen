@@ -1853,6 +1853,12 @@ Please incorporate this company information naturally throughout the document to
                     if prompt_template:
                         self.generation_state['current_step'] = f"Generating AI text for column '{col_name}'..."
                         
+                        # Add table formatting note to the prompt
+                        enhanced_prompt = f"{prompt_template} Note: This will be text data in a table so omit all special formatting."
+                        
+                        # Escape single quotes for SQL safety
+                        safe_prompt = enhanced_prompt.replace("'", "\\'")
+                        
                         # Use ai_query to generate text based on the prompt
                         from pyspark.sql.functions import expr
                         
@@ -1861,7 +1867,7 @@ Please incorporate this company information naturally throughout the document to
                             expr(
                                 "ai_query("
                                 f"'{self.endpoint_name}', "
-                                f"request => '{prompt_template}', "
+                                f"request => '{safe_prompt}', "
                                 "params => map('temperature', 0.9, 'top_p', 0.95)"
                                 ")"
                             )
@@ -1965,15 +1971,15 @@ Please incorporate this company information naturally throughout the document to
                         
                         for i in range(min(batch_size, row_count)):
                             try:
+                                # Add table formatting note to the prompt
+                                enhanced_prompt = f"{prompt_template} Note: This will be text data in a table so omit all special formatting."
+                                
                                 # Use the LLM endpoint to generate text
-                                messages = [{"role": "user", "content": prompt_template}]
+                                messages = [{"role": "user", "content": enhanced_prompt}]
                                 response = query_endpoint(self.endpoint_name, messages, 200)
                                 
-                                # Extract content from response
-                                if hasattr(response, 'get'):
-                                    ai_text = response.get('content', str(response))
-                                else:
-                                    ai_text = str(response)
+                                # Extract clean content from response using existing method
+                                ai_text = self._extract_content_safely(response)
                                 
                                 ai_texts.append(ai_text)
                             except Exception as e:
