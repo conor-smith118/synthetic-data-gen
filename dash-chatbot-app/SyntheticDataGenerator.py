@@ -428,9 +428,13 @@ class SyntheticDataGenerator:
             Output('operations-store', 'data', allow_duplicate=True),
             Input({'type': 'add-column', 'index': dash.dependencies.ALL}, 'n_clicks'),
             State('operations-store', 'data'),
+            State({'type': 'col-name', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             prevent_initial_call=True
         )
-        def add_column(n_clicks_list, operations):
+        def add_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs):
             if not operations or not any(n_clicks_list):
                 return dash.no_update
             
@@ -444,7 +448,31 @@ class SyntheticDataGenerator:
                 triggered_comp = json.loads(triggered_id)
                 op_id = triggered_comp['index']
                 
-                # Find the operation and add a new column
+                # First, update existing columns with current input values to preserve debounced inputs
+                # This captures any values that were typed but not yet saved due to debouncing
+                for op in operations:
+                    if op['id'] == op_id and op['type'] == 'tabular':
+                        columns = op['config'].get('columns', [])
+                        
+                        # Update each existing column with current input state values
+                        for i, col in enumerate(columns):
+                            # Update name if we have a corresponding value
+                            if col_names and i < len(col_names) and col_names[i] is not None:
+                                col['name'] = col_names[i]
+                            
+                            # Update data type if we have a corresponding value  
+                            if col_types and i < len(col_types) and col_types[i] is not None:
+                                col['data_type'] = col_types[i]
+                            
+                            # Update min/max values for Integer types
+                            if col.get('data_type') == 'Integer':
+                                if col_mins and i < len(col_mins) and col_mins[i] is not None:
+                                    col['min_value'] = col_mins[i]
+                                if col_maxs and i < len(col_maxs) and col_maxs[i] is not None:
+                                    col['max_value'] = col_maxs[i]
+                        break
+                
+                # Now find the operation and add a new column
                 for op in operations:
                     if op['id'] == op_id and op['type'] == 'tabular':
                         if 'columns' not in op['config']:
@@ -476,9 +504,13 @@ class SyntheticDataGenerator:
             Output('operations-store', 'data', allow_duplicate=True),
             Input({'type': 'remove-column', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'n_clicks'),
             State('operations-store', 'data'),
+            State({'type': 'col-name', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+            State({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
             prevent_initial_call=True
         )
-        def remove_column(n_clicks_list, operations):
+        def remove_column(n_clicks_list, operations, col_names, col_types, col_mins, col_maxs):
             if not operations or not any(n_clicks_list):
                 return dash.no_update
             
@@ -493,7 +525,30 @@ class SyntheticDataGenerator:
                 op_id = triggered_comp['op']
                 col_id = triggered_comp['col']
                 
-                # Find the operation and remove the column
+                # First, preserve current input values before removing column
+                for op in operations:
+                    if op['id'] == op_id and op['type'] == 'tabular':
+                        columns = op['config'].get('columns', [])
+                        
+                        # Update each existing column with current input state values
+                        for i, col in enumerate(columns):
+                            # Update name if we have a corresponding value
+                            if col_names and i < len(col_names) and col_names[i] is not None:
+                                col['name'] = col_names[i]
+                            
+                            # Update data type if we have a corresponding value  
+                            if col_types and i < len(col_types) and col_types[i] is not None:
+                                col['data_type'] = col_types[i]
+                            
+                            # Update min/max values for Integer types
+                            if col.get('data_type') == 'Integer':
+                                if col_mins and i < len(col_mins) and col_mins[i] is not None:
+                                    col['min_value'] = col_mins[i]
+                                if col_maxs and i < len(col_maxs) and col_maxs[i] is not None:
+                                    col['max_value'] = col_maxs[i]
+                        break
+                
+                # Now find the operation and remove the column
                 for op in operations:
                     if op['id'] == op_id and op['type'] == 'tabular':
                         if 'columns' in op['config']:
