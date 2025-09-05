@@ -274,7 +274,11 @@ class SyntheticDataGenerator:
              Input({'type': 'text-format', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-count', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'tabular-name', 'index': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'tabular-rows', 'index': dash.dependencies.ALL}, 'value')],
+             Input({'type': 'tabular-rows', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-name', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
             State('operations-store', 'data'),
             prevent_initial_call=True
         )
@@ -295,47 +299,89 @@ class SyntheticDataGenerator:
             try:
                 import json
                 triggered_comp = json.loads(triggered_id)
-                op_id = triggered_comp['index']
                 comp_type = triggered_comp['type']
                 new_value = ctx.triggered[0]['value']
                 
-                # Find and update the operation
-                for op in operations:
-                    if op['id'] == op_id:
-                        if 'config' not in op:
-                            op['config'] = {}
-                        
-                        # Update the specific config value
-                        if comp_type == 'pdf-description':
-                            op['config']['description'] = new_value
-                        elif comp_type == 'pdf-doc-type':
-                            op['config']['doc_type'] = new_value
-                        elif comp_type == 'pdf-count':
-                            op['config']['count'] = new_value
-                        elif comp_type == 'text-description':
-                            op['config']['description'] = new_value
-                        elif comp_type == 'text-doc-type':
-                            op['config']['doc_type'] = new_value
-                        elif comp_type == 'text-format':
-                            op['config']['file_format'] = new_value
-                        elif comp_type == 'text-count':
-                            op['config']['count'] = new_value
-                        elif comp_type == 'tabular-name':
-                            op['config']['table_name'] = new_value
-                        elif comp_type == 'tabular-rows':
-                            op['config']['row_count'] = new_value
-                        
-                        # Mark as configured based on operation type
-                        if op['type'] == 'tabular':
-                            # For tabular operations, require table name and at least one column
-                            table_name = op['config'].get('table_name', '')
-                            columns = op['config'].get('columns', [])
-                            op['configured'] = bool(table_name and table_name.strip() and len(columns) > 0)
-                        else:
-                            # For other operations, require description
-                            description = op['config'].get('description', '')
-                            op['configured'] = bool(description and description.strip())
-                        break
+                # Handle column updates differently from operation updates
+                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max']:
+                    op_id = triggered_comp['op']
+                    col_id = triggered_comp['col']
+                    
+                    # Find and update the column
+                    for op in operations:
+                        if op['id'] == op_id and op['type'] == 'tabular':
+                            if 'columns' not in op['config']:
+                                op['config']['columns'] = []
+                            
+                            # Find or create the column
+                            column = None
+                            for col in op['config']['columns']:
+                                if col['id'] == col_id:
+                                    column = col
+                                    break
+                            
+                            if column:
+                                # Update the column property
+                                if comp_type == 'col-name':
+                                    column['name'] = new_value
+                                elif comp_type == 'col-type':
+                                    column['data_type'] = new_value
+                                    # Reset min/max when type changes
+                                    if new_value == 'Integer':
+                                        if 'min_value' not in column:
+                                            column['min_value'] = 1
+                                        if 'max_value' not in column:
+                                            column['max_value'] = 100
+                                elif comp_type == 'col-min':
+                                    column['min_value'] = new_value
+                                elif comp_type == 'col-max':
+                                    column['max_value'] = new_value
+                                
+                                # Update configured status
+                                table_name = op['config'].get('table_name', '')
+                                op['configured'] = bool(table_name and table_name.strip() and len(op['config']['columns']) > 0)
+                            break
+                else:
+                    # Handle operation-level updates
+                    op_id = triggered_comp['index']
+                    
+                    # Find and update the operation
+                    for op in operations:
+                        if op['id'] == op_id:
+                            if 'config' not in op:
+                                op['config'] = {}
+                            
+                            # Update the specific config value
+                            if comp_type == 'pdf-description':
+                                op['config']['description'] = new_value
+                            elif comp_type == 'pdf-doc-type':
+                                op['config']['doc_type'] = new_value
+                            elif comp_type == 'pdf-count':
+                                op['config']['count'] = new_value
+                            elif comp_type == 'text-description':
+                                op['config']['description'] = new_value
+                            elif comp_type == 'text-doc-type':
+                                op['config']['doc_type'] = new_value
+                            elif comp_type == 'text-format':
+                                op['config']['file_format'] = new_value
+                            elif comp_type == 'text-count':
+                                op['config']['count'] = new_value
+                            elif comp_type == 'tabular-name':
+                                op['config']['table_name'] = new_value
+                            elif comp_type == 'tabular-rows':
+                                op['config']['row_count'] = new_value
+                            
+                            # Mark as configured based on operation type
+                            if op['type'] == 'tabular':
+                                # For tabular operations, require table name and at least one column
+                                table_name = op['config'].get('table_name', '')
+                                columns = op['config'].get('columns', [])
+                                op['configured'] = bool(table_name and table_name.strip() and len(columns) > 0)
+                            else:
+                                # For other operations, require description
+                                description = op['config'].get('description', '')
+                                op['configured'] = bool(description and description.strip())
+                            break
                 
                 return operations
                 
@@ -484,6 +530,61 @@ class SyntheticDataGenerator:
                     return self._create_column_cards(columns, op_id)
             
             return []
+        
+        # Update column type-specific configuration callback
+        @self.app.callback(
+            Output({'type': 'col-config', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'children'),
+            Input({'type': 'col-type', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'value'),
+            State({'type': 'col-config', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'id'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def update_column_config(col_type, config_id, operations):
+            if col_type == 'Integer':
+                # Get existing values for this column
+                min_val, max_val = 1, 100
+                
+                if operations:
+                    op_id = config_id['op']
+                    col_id = config_id['col']
+                    
+                    # Find the operation and column to get existing values
+                    for op in operations:
+                        if op['id'] == op_id and op['type'] == 'tabular':
+                            columns = op['config'].get('columns', [])
+                            for col in columns:
+                                if col['id'] == col_id:
+                                    min_val = col.get('min_value', 1)
+                                    max_val = col.get('max_value', 100)
+                                    break
+                            break
+                
+                # Show min/max inputs for Integer type
+                return [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Min Value:", className="form-label"),
+                            dbc.Input(
+                                id={'type': 'col-min', 'op': config_id['op'], 'col': config_id['col']},
+                                type="number",
+                                value=min_val,
+                                size="sm"
+                            )
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Max Value:", className="form-label"),
+                            dbc.Input(
+                                id={'type': 'col-max', 'op': config_id['op'], 'col': config_id['col']},
+                                type="number",
+                                value=max_val,
+                                size="sm"
+                            )
+                        ], width=6)
+                    ])
+                ]
+            else:
+                # No additional inputs for First Name or Last Name
+                return []
 
     def _create_operation_card(self, operation):
         """Create a card for configuring an operation."""
@@ -650,8 +751,7 @@ class SyntheticDataGenerator:
             col_name = col.get('name', '')
             col_type = col.get('data_type', 'Integer')
             
-            # Create type-specific configuration inputs
-            type_inputs = []
+            # Type-specific inputs will be populated dynamically by callback
             if col_type == 'Integer':
                 type_inputs = [
                     dbc.Row([
@@ -675,6 +775,8 @@ class SyntheticDataGenerator:
                         ], width=6)
                     ])
                 ]
+            else:
+                type_inputs = []
             
             card = dbc.Card([
                 dbc.CardBody([
