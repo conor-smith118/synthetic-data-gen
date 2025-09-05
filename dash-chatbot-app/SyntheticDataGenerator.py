@@ -327,12 +327,15 @@ class SyntheticDataGenerator:
                                     column['name'] = new_value
                                 elif comp_type == 'col-type':
                                     column['data_type'] = new_value
-                                    # Reset min/max when type changes
+                                    # Initialize type-specific fields when type changes
                                     if new_value == 'Integer':
                                         if 'min_value' not in column:
                                             column['min_value'] = 1
                                         if 'max_value' not in column:
                                             column['max_value'] = 100
+                                    elif new_value == 'GenAI Text':
+                                        if 'prompt' not in column:
+                                            column['prompt'] = ''
                                 elif comp_type == 'col-min':
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
@@ -466,7 +469,17 @@ class SyntheticDataGenerator:
                             
                             # Update data type if we have a corresponding value  
                             if col_types and i < len(col_types) and col_types[i] is not None:
-                                col['data_type'] = col_types[i]
+                                new_type = col_types[i]
+                                col['data_type'] = new_type
+                                # Initialize type-specific fields when type changes
+                                if new_type == 'Integer':
+                                    if 'min_value' not in col:
+                                        col['min_value'] = 1
+                                    if 'max_value' not in col:
+                                        col['max_value'] = 100
+                                elif new_type == 'GenAI Text':
+                                    if 'prompt' not in col:
+                                        col['prompt'] = ''
                             
                             # Update min/max values for Integer types
                             if col.get('data_type') == 'Integer':
@@ -549,7 +562,17 @@ class SyntheticDataGenerator:
                             
                             # Update data type if we have a corresponding value  
                             if col_types and i < len(col_types) and col_types[i] is not None:
-                                col['data_type'] = col_types[i]
+                                new_type = col_types[i]
+                                col['data_type'] = new_type
+                                # Initialize type-specific fields when type changes
+                                if new_type == 'Integer':
+                                    if 'min_value' not in col:
+                                        col['min_value'] = 1
+                                    if 'max_value' not in col:
+                                        col['max_value'] = 100
+                                elif new_type == 'GenAI Text':
+                                    if 'prompt' not in col:
+                                        col['prompt'] = ''
                             
                             # Update min/max values for Integer types
                             if col.get('data_type') == 'Integer':
@@ -860,7 +883,7 @@ class SyntheticDataGenerator:
             col_name = col.get('name', '')
             col_type = col.get('data_type', 'Integer')
             
-            # Type-specific inputs will be populated dynamically by callback
+            # Type-specific inputs based on column type
             if col_type == 'Integer':
                 type_inputs = [
                     dbc.Row([
@@ -886,7 +909,23 @@ class SyntheticDataGenerator:
                         ], width=6)
                     ])
                 ]
+            elif col_type == 'GenAI Text':
+                type_inputs = [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Text Gen Prompt:", className="form-label fw-bold"),
+                            dbc.Textarea(
+                                id={'type': 'col-prompt', 'op': op_id, 'col': col_id},
+                                placeholder="Enter the prompt template for generating text for each row...",
+                                value=col.get('prompt', ''),
+                                rows=3,
+                                debounce=True
+                            )
+                        ], width=12)
+                    ])
+                ]
             else:
+                # No additional inputs for First Name or Last Name
                 type_inputs = []
             
             card = dbc.Card([
