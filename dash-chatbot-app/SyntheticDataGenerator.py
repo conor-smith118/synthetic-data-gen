@@ -713,7 +713,7 @@ class SyntheticDataGenerator:
                     ], className="mb-2"),
                     html.Div(type_inputs, id={'type': 'col-config', 'op': op_id, 'col': col_id})
                 ])
-            ], size="sm", className="mb-2")
+            ], className="mb-2")
             
             column_cards.append(card)
         
