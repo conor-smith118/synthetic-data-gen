@@ -36,6 +36,80 @@ class SyntheticDataGenerator:
         self._create_callbacks()
         self._add_custom_css()
 
+    def _parse_column_references(self, prompt_text):
+        """Extract column names referenced in the prompt using <Column Name> syntax."""
+        import re
+        # Find all text within angle brackets
+        column_refs = re.findall(r'<([^<>]+)>', prompt_text)
+        return column_refs
+    
+    def _substitute_column_references_spark(self, prompt_template, columns):
+        """Create Spark SQL expression to substitute column references in prompt."""
+        # Parse column references from prompt
+        column_refs = self._parse_column_references(prompt_template)
+        
+        if not column_refs:
+            # No column references, return original prompt
+            return f"'{prompt_template.replace('\'', '\\')}'"
+        
+        # Build list of available non-GenAI columns
+        available_columns = {}
+        for col in columns:
+            col_name = col.get('name', '')
+            col_type = col.get('data_type', '')
+            if col_type != 'GenAI Text' and col_name:
+                available_columns[col_name] = col_name
+        
+        # Start with the base prompt template
+        spark_expression = f"'{prompt_template}'"
+        
+        # Replace each column reference with a CONCAT operation
+        for col_ref in column_refs:
+            if col_ref in available_columns:
+                # Replace <Column Name> with actual column value
+                placeholder = f"<{col_ref}>"
+                # Use REPLACE function to substitute the placeholder with the column value
+                spark_expression = f"REPLACE({spark_expression}, '{placeholder}', CAST(`{col_ref}` AS STRING))"
+            else:
+                print(f"Warning: Column '{col_ref}' not found or is a GenAI Text column. Leaving placeholder unchanged.")
+        
+        return spark_expression
+    
+    def _substitute_column_references_pandas(self, prompt_template, row_data, columns):
+        """Substitute column references in prompt for a single row."""
+        # Parse column references from prompt
+        column_refs = self._parse_column_references(prompt_template)
+        
+        if not column_refs:
+            # No column references, return original prompt
+            return prompt_template
+        
+        # Build list of available non-GenAI columns
+        available_columns = {}
+        for col in columns:
+            col_name = col.get('name', '')
+            col_type = col.get('data_type', '')
+            if col_type != 'GenAI Text' and col_name:
+                available_columns[col_name] = col_name
+        
+        # Start with the original prompt
+        substituted_prompt = prompt_template
+        
+        # Replace each column reference with the actual value
+        for col_ref in column_refs:
+            if col_ref in available_columns and col_ref in row_data:
+                placeholder = f"<{col_ref}>"
+                # Get the value and convert to string
+                value = str(row_data[col_ref]) if row_data[col_ref] is not None else ""
+                substituted_prompt = substituted_prompt.replace(placeholder, value)
+            else:
+                if col_ref not in available_columns:
+                    print(f"Warning: Column '{col_ref}' not found or is a GenAI Text column. Leaving placeholder unchanged.")
+                elif col_ref not in row_data:
+                    print(f"Warning: Column '{col_ref}' not found in row data. Leaving placeholder unchanged.")
+        
+        return substituted_prompt
+
     def _create_callbacks(self):
         # Enable/disable add operation button based on data type selection
         @self.app.callback(
@@ -757,9 +831,10 @@ class SyntheticDataGenerator:
                     dbc.Row([
                         dbc.Col([
                             html.Label("Text Gen Prompt:", className="form-label fw-bold"),
+                            html.Small("Use <Column Name> to reference other column values in your prompt", className="text-muted mb-2 d-block"),
                             dbc.Textarea(
                                 id={'type': 'col-prompt', 'op': config_id['op'], 'col': config_id['col']},
-                                placeholder="Enter the prompt template for generating text for each row...",
+                                placeholder="e.g., Write a personalized greeting for <First Name> <Last Name> who works as a <Job Title>",
                                 value=prompt_val,
                                 rows=3,
                                 debounce=True
@@ -900,6 +975,7 @@ class SyntheticDataGenerator:
             checkbox_style = {} if len(custom_values) >= 2 else {'display': 'none'}
             
             return self._create_custom_values_inputs(custom_values, custom_weights, use_weights, op_id, col_id), checkbox_style
+
 
         # Add custom value callback
         @self.app.callback(
@@ -1274,9 +1350,10 @@ class SyntheticDataGenerator:
                     dbc.Row([
                         dbc.Col([
                             html.Label("Text Gen Prompt:", className="form-label fw-bold"),
+                            html.Small("Use <Column Name> to reference other column values in your prompt", className="text-muted mb-2 d-block"),
                             dbc.Textarea(
                                 id={'type': 'col-prompt', 'op': op_id, 'col': col_id},
-                                placeholder="Enter the prompt template for generating text for each row...",
+                                placeholder="e.g., Write a personalized greeting for <First Name> <Last Name> who works as a <Job Title>",
                                 value=col.get('prompt', ''),
                                 rows=3,
                                 debounce=True
@@ -2322,13 +2399,13 @@ Please incorporate this company information naturally throughout the document to
                         # Add table formatting note to the prompt
                         enhanced_prompt = f"{prompt_template} Note: This will be text data in a table so omit all special formatting."
                         
-                        # Escape single quotes for SQL safety
-                        safe_prompt = enhanced_prompt.replace("'", "\\'")
-                        
                         # Get max_tokens from column config (default 500 if not specified)
                         max_tokens = col.get('max_tokens', 500)
                         
-                        # Use ai_query to generate text based on the prompt
+                        # Create dynamic prompt expression with column substitution
+                        prompt_expression = self._substitute_column_references_spark(enhanced_prompt, columns)
+                        
+                        # Use ai_query to generate text based on the dynamic prompt
                         from pyspark.sql.functions import expr
                         
                         df = df.withColumn(
@@ -2336,7 +2413,7 @@ Please incorporate this company information naturally throughout the document to
                             expr(
                                 "ai_query("
                                 f"'{self.endpoint_name}', "
-                                f"request => '{safe_prompt}', "
+                                f"request => {prompt_expression}, "
                                 f"params => map('temperature', 0.9, 'top_p', 0.95, 'max_tokens', {max_tokens})"
                                 ")"
                             )
@@ -2468,11 +2545,19 @@ Please incorporate this company information naturally throughout the document to
                         
                         for i in range(min(batch_size, row_count)):
                             try:
+                                # Get current row data for column substitution
+                                row_data = {col: df.iloc[i][col] for col in df.columns if col in df.columns}
+                                
                                 # Add table formatting note to the prompt
                                 enhanced_prompt = f"{prompt_template} Note: This will be text data in a table so omit all special formatting."
                                 
+                                # Substitute column references with actual row values
+                                contextualized_prompt = self._substitute_column_references_pandas(enhanced_prompt, row_data, columns)
+                                
+                                print(f"GenAI Text Debug - Row {i} contextualized prompt: {contextualized_prompt[:150]}...")
+                                
                                 # Use the LLM endpoint to generate text with higher token limit
-                                messages = [{"role": "user", "content": enhanced_prompt}]
+                                messages = [{"role": "user", "content": contextualized_prompt}]
                                 response = query_endpoint(self.endpoint_name, messages, 500)
                                 
                                 # Debug: log the raw response structure
