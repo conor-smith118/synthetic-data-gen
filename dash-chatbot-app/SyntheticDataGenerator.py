@@ -50,7 +50,8 @@ class SyntheticDataGenerator:
         
         if not column_refs:
             # No column references, return original prompt
-            return f"'{prompt_template.replace('\'', '\\')}'"
+            escaped_prompt = prompt_template.replace("'", "\\'")
+            return f"'{escaped_prompt}'"
         
         # Build list of available non-GenAI columns
         available_columns = {}
@@ -60,8 +61,9 @@ class SyntheticDataGenerator:
             if col_type != 'GenAI Text' and col_name:
                 available_columns[col_name] = col_name
         
-        # Start with the base prompt template
-        spark_expression = f"'{prompt_template}'"
+        # Start with the base prompt template (escape single quotes for SQL)
+        escaped_prompt = prompt_template.replace("'", "\\'")
+        spark_expression = f"'{escaped_prompt}'"
         
         # Replace each column reference with a CONCAT operation
         for col_ref in column_refs:
