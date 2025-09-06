@@ -337,7 +337,7 @@ class SyntheticDataGenerator:
                                         if 'prompt' not in column:
                                             column['prompt'] = ''
                                         if 'max_tokens' not in column:
-                                            column['max_tokens'] = 1000
+                                            column['max_tokens'] = 500
                                 elif comp_type == 'col-min':
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
@@ -517,7 +517,7 @@ class SyntheticDataGenerator:
                             'min_value': 1,
                             'max_value': 100,
                             'prompt': '',
-                            'max_tokens': 1000
+                            'max_tokens': 500
                         }
                         op['config']['columns'].append(new_column)
                         
@@ -702,14 +702,14 @@ class SyntheticDataGenerator:
                     col_id = config_id['col']
                     
                     # Find the operation and column to get existing prompt and max_tokens
-                    max_tokens_val = 1000  # Default value
+                    max_tokens_val = 500  # Default value
                     for op in operations:
                         if op['id'] == op_id and op['type'] == 'tabular':
                             columns = op['config'].get('columns', [])
                             for col in columns:
                                 if col['id'] == col_id:
                                     prompt_val = col.get('prompt', '')
-                                    max_tokens_val = col.get('max_tokens', 1000)
+                                    max_tokens_val = col.get('max_tokens', 500)
                                     break
                             break
                 
@@ -730,15 +730,18 @@ class SyntheticDataGenerator:
                     dbc.Row([
                         dbc.Col([
                             html.Label("Max Tokens:", className="form-label fw-bold"),
-                            dbc.Input(
+                            dcc.Dropdown(
                                 id={'type': 'col-max-tokens', 'op': config_id['op'], 'col': config_id['col']},
-                                type="number",
-                                placeholder="500-5000",
-                                min=500,
-                                max=5000,
-                                value=max_tokens_val,
-                                size="sm",
-                                debounce=True
+                                options=[
+                                    {'label': '100 tokens', 'value': 100},
+                                    {'label': '250 tokens', 'value': 250},
+                                    {'label': '500 tokens', 'value': 500},
+                                    {'label': '2,500 tokens', 'value': 2500},
+                                    {'label': '5,000 tokens', 'value': 5000}
+                                ],
+                                value=max_tokens_val if max_tokens_val in [100, 250, 500, 2500, 5000] else 500,
+                                clearable=False,
+                                style={'fontSize': '14px'}
                             )
                         ], width=6)
                     ])
@@ -958,15 +961,18 @@ class SyntheticDataGenerator:
                     dbc.Row([
                         dbc.Col([
                             html.Label("Max Tokens:", className="form-label fw-bold"),
-                            dbc.Input(
+                            dcc.Dropdown(
                                 id={'type': 'col-max-tokens', 'op': op_id, 'col': col_id},
-                                type="number",
-                                placeholder="500-5000",
-                                min=500,
-                                max=5000,
-                                value=col.get('max_tokens', 1000),
-                                size="sm",
-                                debounce=True
+                                options=[
+                                    {'label': '100 tokens', 'value': 100},
+                                    {'label': '250 tokens', 'value': 250},
+                                    {'label': '500 tokens', 'value': 500},
+                                    {'label': '2,500 tokens', 'value': 2500},
+                                    {'label': '5,000 tokens', 'value': 5000}
+                                ],
+                                value=col.get('max_tokens', 500) if col.get('max_tokens', 500) in [100, 250, 500, 2500, 5000] else 500,
+                                clearable=False,
+                                style={'fontSize': '14px'}
                             )
                         ], width=6)
                     ])
@@ -1932,8 +1938,8 @@ Please incorporate this company information naturally throughout the document to
                         # Escape single quotes for SQL safety
                         safe_prompt = enhanced_prompt.replace("'", "\\'")
                         
-                        # Get max_tokens from column config (default 1000 if not specified)
-                        max_tokens = col.get('max_tokens', 1000)
+                        # Get max_tokens from column config (default 500 if not specified)
+                        max_tokens = col.get('max_tokens', 500)
                         
                         # Use ai_query to generate text based on the prompt
                         from pyspark.sql.functions import expr
