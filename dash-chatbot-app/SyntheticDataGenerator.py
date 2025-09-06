@@ -840,27 +840,29 @@ class SyntheticDataGenerator:
                     ], width=12)
                 ], className="mt-2"))
                 
-                # Weights checkbox (only show if 2+ values)
-                if len(custom_values) >= 2:
-                    children.append(dbc.Row([
-                        dbc.Col([
-                            dbc.Checklist(
-                                id={'type': 'use-weights-checkbox', 'op': config_id['op'], 'col': config_id['col']},
-                                options=[{'label': ' Use Weights', 'value': 'use_weights'}],
-                                value=['use_weights'] if use_weights else [],
-                                inline=True
-                            )
-                        ], width=12)
-                    ], className="mt-2"))
+                # Weights checkbox (always render but hide if < 2 values)
+                checkbox_style = {} if len(custom_values) >= 2 else {'display': 'none'}
+                children.append(dbc.Row([
+                    dbc.Col([
+                        dbc.Checklist(
+                            id={'type': 'use-weights-checkbox', 'op': config_id['op'], 'col': config_id['col']},
+                            options=[{'label': ' Use Weights', 'value': 'use_weights'}],
+                            value=['use_weights'] if use_weights else [],
+                            inline=True,
+                            style=checkbox_style
+                        )
+                    ], width=12)
+                ], className="mt-2", style=checkbox_style))
                 
                 return children
             else:
                 # No additional inputs for First Name or Last Name
                 return []
         
-        # Custom values container callback
+        # Custom values container callback - handles dynamic updates to the values input area
         @self.app.callback(
-            Output({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'children'),
+            [Output({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'children'),
+             Output({'type': 'use-weights-checkbox', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'style')],
             [Input({'type': 'add-custom-value', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'n_clicks'),
              Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'value')],
             [State({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'id'),
@@ -869,7 +871,7 @@ class SyntheticDataGenerator:
         )
         def update_custom_values_container(add_clicks, weights_checked, container_id, operations):
             if not operations:
-                return []
+                return [], {'display': 'none'}
             
             # Get custom values for this column
             op_id = container_id['op']
@@ -894,7 +896,10 @@ class SyntheticDataGenerator:
                 custom_values = ['']
                 custom_weights = [1]
             
-            return self._create_custom_values_inputs(custom_values, custom_weights, use_weights, op_id, col_id)
+            # Determine checkbox visibility
+            checkbox_style = {} if len(custom_values) >= 2 else {'display': 'none'}
+            
+            return self._create_custom_values_inputs(custom_values, custom_weights, use_weights, op_id, col_id), checkbox_style
 
     def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
         """Create input fields for custom values and optional weights."""
@@ -1306,18 +1311,19 @@ class SyntheticDataGenerator:
                     ], className="mt-2"),
                 ]
                 
-                # Add weights checkbox if there are 2+ values
-                if len(custom_values) >= 2:
-                    type_inputs.append(dbc.Row([
-                        dbc.Col([
-                            dbc.Checklist(
-                                id={'type': 'use-weights-checkbox', 'op': op_id, 'col': col_id},
-                                options=[{'label': ' Use Weights', 'value': 'use_weights'}],
-                                value=['use_weights'] if use_weights else [],
-                                inline=True
-                            )
-                        ], width=12)
-                    ], className="mt-2"))
+                # Add weights checkbox (always render but hide if < 2 values)
+                checkbox_style = {} if len(custom_values) >= 2 else {'display': 'none'}
+                type_inputs.append(dbc.Row([
+                    dbc.Col([
+                        dbc.Checklist(
+                            id={'type': 'use-weights-checkbox', 'op': op_id, 'col': col_id},
+                            options=[{'label': ' Use Weights', 'value': 'use_weights'}],
+                            value=['use_weights'] if use_weights else [],
+                            inline=True,
+                            style=checkbox_style
+                        )
+                    ], width=12)
+                ], className="mt-2", style=checkbox_style))
             else:
                 # No additional inputs for First Name or Last Name
                 type_inputs = []
