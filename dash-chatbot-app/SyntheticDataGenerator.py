@@ -279,7 +279,10 @@ class SyntheticDataGenerator:
              Input({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
+             Input({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'custom-value-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'custom-weight-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
             State('operations-store', 'data'),
             prevent_initial_call=True
         )
@@ -304,7 +307,8 @@ class SyntheticDataGenerator:
                 new_value = ctx.triggered[0]['value']
                 
                 # Handle column updates differently from operation updates
-                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-prompt', 'col-max-tokens']:
+                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-prompt', 'col-max-tokens', 
+                                'custom-value-input', 'custom-weight-input', 'use-weights-checkbox']:
                     op_id = triggered_comp['op']
                     col_id = triggered_comp['col']
                     
@@ -338,6 +342,13 @@ class SyntheticDataGenerator:
                                             column['prompt'] = ''
                                         if 'max_tokens' not in column:
                                             column['max_tokens'] = 500
+                                    elif new_value == 'Custom Values':
+                                        if 'custom_values' not in column:
+                                            column['custom_values'] = ['']
+                                        if 'use_weights' not in column:
+                                            column['use_weights'] = False
+                                        if 'custom_weights' not in column:
+                                            column['custom_weights'] = [1]
                                 elif comp_type == 'col-min':
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
@@ -346,6 +357,31 @@ class SyntheticDataGenerator:
                                     column['prompt'] = new_value
                                 elif comp_type == 'col-max-tokens':
                                     column['max_tokens'] = new_value
+                                elif comp_type == 'custom-value-input':
+                                    # Handle custom value input updates
+                                    idx = triggered_comp['idx']
+                                    custom_values = column.get('custom_values', [''])
+                                    # Ensure list is long enough
+                                    while len(custom_values) <= idx:
+                                        custom_values.append('')
+                                    custom_values[idx] = new_value or ''
+                                    column['custom_values'] = custom_values
+                                elif comp_type == 'custom-weight-input':
+                                    # Handle custom weight input updates
+                                    idx = triggered_comp['idx']
+                                    custom_weights = column.get('custom_weights', [1])
+                                    # Ensure list is long enough
+                                    while len(custom_weights) <= idx:
+                                        custom_weights.append(1)
+                                    try:
+                                        custom_weights[idx] = float(new_value) if new_value else 1.0
+                                    except (ValueError, TypeError):
+                                        custom_weights[idx] = 1.0
+                                    column['custom_weights'] = custom_weights
+                                elif comp_type == 'use-weights-checkbox':
+                                    # Handle weights checkbox toggle
+                                    use_weights = bool(new_value and 'use_weights' in new_value)
+                                    column['use_weights'] = use_weights
                                 
                                 # Update configured status
                                 table_name = op['config'].get('table_name', '')
@@ -517,7 +553,10 @@ class SyntheticDataGenerator:
                             'min_value': 1,
                             'max_value': 100,
                             'prompt': '',
-                            'max_tokens': 500
+                            'max_tokens': 500,
+                            'custom_values': [''],
+                            'use_weights': False,
+                            'custom_weights': [1]
                         }
                         op['config']['columns'].append(new_column)
                         
@@ -746,9 +785,270 @@ class SyntheticDataGenerator:
                         ], width=6)
                     ])
                 ]
+            elif col_type == 'Custom Values':
+                # Get existing custom values for this column
+                custom_values = ['']  # Default: one empty value
+                use_weights = False
+                custom_weights = [1]  # Default weights
+                
+                if operations:
+                    op_id = config_id['op']
+                    col_id = config_id['col']
+                    
+                    # Find the operation and column to get existing values
+                    for op in operations:
+                        if op['id'] == op_id and op['type'] == 'tabular':
+                            columns = op['config'].get('columns', [])
+                            for col in columns:
+                                if col['id'] == col_id:
+                                    custom_values = col.get('custom_values', [''])
+                                    use_weights = col.get('use_weights', False)
+                                    custom_weights = col.get('custom_weights', [1] * len(custom_values))
+                                    break
+                            break
+                
+                # Ensure we have at least one value
+                if not custom_values:
+                    custom_values = ['']
+                    custom_weights = [1]
+                
+                # Ensure weights list matches values list length
+                while len(custom_weights) < len(custom_values):
+                    custom_weights.append(1)
+                
+                # Build the UI elements
+                children = []
+                
+                # Values section
+                children.append(dbc.Row([
+                    dbc.Col([
+                        html.Label("Custom Values:", className="form-label fw-bold"),
+                        html.Div(id={'type': 'custom-values-container', 'op': config_id['op'], 'col': config_id['col']})
+                    ], width=12)
+                ]))
+                
+                # Add Value button
+                children.append(dbc.Row([
+                    dbc.Col([
+                        dbc.Button(
+                            "+ Add Value",
+                            id={'type': 'add-custom-value', 'op': config_id['op'], 'col': config_id['col']},
+                            size="sm",
+                            color="secondary",
+                            outline=True
+                        )
+                    ], width=12)
+                ], className="mt-2"))
+                
+                # Weights checkbox (only show if 2+ values)
+                if len(custom_values) >= 2:
+                    children.append(dbc.Row([
+                        dbc.Col([
+                            dbc.Checklist(
+                                id={'type': 'use-weights-checkbox', 'op': config_id['op'], 'col': config_id['col']},
+                                options=[{'label': ' Use Weights', 'value': 'use_weights'}],
+                                value=['use_weights'] if use_weights else [],
+                                inline=True
+                            )
+                        ], width=12)
+                    ], className="mt-2"))
+                
+                return children
             else:
                 # No additional inputs for First Name or Last Name
                 return []
+        
+        # Custom values container callback
+        @self.app.callback(
+            Output({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'children'),
+            [Input({'type': 'add-custom-value', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'n_clicks'),
+             Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'value')],
+            [State({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'id'),
+             State('operations-store', 'data')],
+            prevent_initial_call=False
+        )
+        def update_custom_values_container(add_clicks, weights_checked, container_id, operations):
+            if not operations:
+                return []
+            
+            # Get custom values for this column
+            op_id = container_id['op']
+            col_id = container_id['col']
+            custom_values = ['']
+            use_weights = False
+            custom_weights = [1]
+            
+            for op in operations:
+                if op['id'] == op_id and op['type'] == 'tabular':
+                    columns = op['config'].get('columns', [])
+                    for col in columns:
+                        if col['id'] == col_id:
+                            custom_values = col.get('custom_values', [''])
+                            use_weights = bool(weights_checked and 'use_weights' in weights_checked)
+                            custom_weights = col.get('custom_weights', [1] * len(custom_values))
+                            break
+                    break
+            
+            # Ensure we have at least one value
+            if not custom_values:
+                custom_values = ['']
+                custom_weights = [1]
+            
+            return self._create_custom_values_inputs(custom_values, custom_weights, use_weights, op_id, col_id)
+
+    def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
+        """Create input fields for custom values and optional weights."""
+        children = []
+        
+        for i, (value, weight) in enumerate(zip(custom_values, custom_weights)):
+            row_children = []
+            
+            # Value input
+            if use_weights:
+                # Value input takes 8 columns, weight takes 3, remove button takes 1
+                row_children.append(dbc.Col([
+                    dbc.Input(
+                        id={'type': 'custom-value-input', 'op': op_id, 'col': col_id, 'idx': i},
+                        placeholder=f"Value {i+1}",
+                        value=value,
+                        debounce=True
+                    )
+                ], width=8))
+                
+                # Weight input
+                row_children.append(dbc.Col([
+                    dbc.Input(
+                        id={'type': 'custom-weight-input', 'op': op_id, 'col': col_id, 'idx': i},
+                        type="number",
+                        placeholder="Weight",
+                        value=weight,
+                        min=0.1,
+                        step=0.1,
+                        debounce=True
+                    )
+                ], width=3))
+            else:
+                # Value input takes 11 columns, remove button takes 1
+                row_children.append(dbc.Col([
+                    dbc.Input(
+                        id={'type': 'custom-value-input', 'op': op_id, 'col': col_id, 'idx': i},
+                        placeholder=f"Value {i+1}",
+                        value=value,
+                        debounce=True
+                    )
+                ], width=11))
+            
+            # Remove button (only show if more than 1 value)
+            if len(custom_values) > 1:
+                row_children.append(dbc.Col([
+                    dbc.Button(
+                        "×",
+                        id={'type': 'remove-custom-value', 'op': op_id, 'col': col_id, 'idx': i},
+                        size="sm",
+                        color="danger",
+                        outline=True
+                    )
+                ], width=1))
+            else:
+                # Empty column to maintain alignment
+                row_children.append(dbc.Col([], width=1))
+            
+            children.append(dbc.Row(row_children, className="mb-2"))
+        
+        return children
+        
+        # Add custom value callback
+        @self.app.callback(
+            Output('operations-store', 'data', allow_duplicate=True),
+            Input({'type': 'add-custom-value', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'n_clicks'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def add_custom_value(n_clicks_list, operations):
+            if not operations or not any(n_clicks_list):
+                return dash.no_update
+            
+            ctx = callback_context
+            if not ctx.triggered:
+                return dash.no_update
+            
+            try:
+                import json
+                triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                triggered_comp = json.loads(triggered_id)
+                op_id = triggered_comp['op']
+                col_id = triggered_comp['col']
+                
+                # Find the operation and column, add a new custom value
+                for op in operations:
+                    if op['id'] == op_id and op['type'] == 'tabular':
+                        columns = op['config'].get('columns', [])
+                        for col in columns:
+                            if col['id'] == col_id and col.get('data_type') == 'Custom Values':
+                                custom_values = col.get('custom_values', [''])
+                                custom_weights = col.get('custom_weights', [1])
+                                
+                                # Add new empty value and default weight
+                                custom_values.append('')
+                                custom_weights.append(1)
+                                
+                                col['custom_values'] = custom_values
+                                col['custom_weights'] = custom_weights
+                                break
+                        break
+                
+                return operations
+            except Exception as e:
+                print(f"Error adding custom value: {str(e)}")
+                return dash.no_update
+        
+        # Remove custom value callback
+        @self.app.callback(
+            Output('operations-store', 'data', allow_duplicate=True),
+            Input({'type': 'remove-custom-value', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'n_clicks'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def remove_custom_value(n_clicks_list, operations):
+            if not operations or not any(n_clicks_list):
+                return dash.no_update
+            
+            ctx = callback_context
+            if not ctx.triggered:
+                return dash.no_update
+            
+            try:
+                import json
+                triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                triggered_comp = json.loads(triggered_id)
+                op_id = triggered_comp['op']
+                col_id = triggered_comp['col']
+                idx_to_remove = triggered_comp['idx']
+                
+                # Find the operation and column, remove the specified value
+                for op in operations:
+                    if op['id'] == op_id and op['type'] == 'tabular':
+                        columns = op['config'].get('columns', [])
+                        for col in columns:
+                            if col['id'] == col_id and col.get('data_type') == 'Custom Values':
+                                custom_values = col.get('custom_values', [''])
+                                custom_weights = col.get('custom_weights', [1])
+                                
+                                # Don't remove if it's the only value
+                                if len(custom_values) > 1 and 0 <= idx_to_remove < len(custom_values):
+                                    custom_values.pop(idx_to_remove)
+                                    if idx_to_remove < len(custom_weights):
+                                        custom_weights.pop(idx_to_remove)
+                                
+                                col['custom_values'] = custom_values
+                                col['custom_weights'] = custom_weights
+                                break
+                        break
+                
+                return operations
+            except Exception as e:
+                print(f"Error removing custom value: {str(e)}")
+                return dash.no_update
 
     def _create_operation_card(self, operation):
         """Create a card for configuring an operation."""
@@ -977,6 +1277,47 @@ class SyntheticDataGenerator:
                         ], width=6)
                     ])
                 ]
+            elif col_type == 'Custom Values':
+                # For Custom Values, create the container that will be populated by callback
+                custom_values = col.get('custom_values', [''])
+                use_weights = col.get('use_weights', False)
+                custom_weights = col.get('custom_weights', [1])
+                
+                type_inputs = [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Custom Values:", className="form-label fw-bold"),
+                            html.Div(
+                                self._create_custom_values_inputs(custom_values, custom_weights, use_weights, op_id, col_id),
+                                id={'type': 'custom-values-container', 'op': op_id, 'col': col_id}
+                            )
+                        ], width=12)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button(
+                                "+ Add Value",
+                                id={'type': 'add-custom-value', 'op': op_id, 'col': col_id},
+                                size="sm",
+                                color="secondary",
+                                outline=True
+                            )
+                        ], width=12)
+                    ], className="mt-2"),
+                ]
+                
+                # Add weights checkbox if there are 2+ values
+                if len(custom_values) >= 2:
+                    type_inputs.append(dbc.Row([
+                        dbc.Col([
+                            dbc.Checklist(
+                                id={'type': 'use-weights-checkbox', 'op': op_id, 'col': col_id},
+                                options=[{'label': ' Use Weights', 'value': 'use_weights'}],
+                                value=['use_weights'] if use_weights else [],
+                                inline=True
+                            )
+                        ], width=12)
+                    ], className="mt-2"))
             else:
                 # No additional inputs for First Name or Last Name
                 type_inputs = []
@@ -1002,7 +1343,8 @@ class SyntheticDataGenerator:
                                     {'label': 'Integer', 'value': 'Integer'},
                                     {'label': 'First Name', 'value': 'First Name'},
                                     {'label': 'Last Name', 'value': 'Last Name'},
-                                    {'label': 'GenAI Text', 'value': 'GenAI Text'}
+                                    {'label': 'GenAI Text', 'value': 'GenAI Text'},
+                                    {'label': 'Custom Values', 'value': 'Custom Values'}
                                 ],
                                 value=col_type,
                                 style={'font-size': '14px'}
@@ -1915,6 +2257,24 @@ Please incorporate this company information naturally throughout the document to
                     # For GenAI Text, we'll add it after the DataFrame is created
                     # as it requires using ai_query with existing columns
                     data_gen = data_gen.withColumn(col_name, "string", values=[""])
+                elif col_type == 'Custom Values':
+                    # For Custom Values, use values and optional weights
+                    custom_values = col.get('custom_values', [''])
+                    use_weights = col.get('use_weights', False)
+                    custom_weights = col.get('custom_weights', [1])
+                    
+                    # Filter out empty values
+                    filtered_values = [v for v in custom_values if v.strip()]
+                    if not filtered_values:
+                        filtered_values = ['DefaultValue']  # Fallback if all values are empty
+                    
+                    if use_weights and len(custom_weights) >= len(filtered_values):
+                        # Use weights if enabled and we have enough weights
+                        filtered_weights = custom_weights[:len(filtered_values)]
+                        data_gen = data_gen.withColumn(col_name, values=filtered_values, weights=filtered_weights)
+                    else:
+                        # Use values without weights
+                        data_gen = data_gen.withColumn(col_name, values=filtered_values)
             
             # Only include user-specified columns (no automatic company columns)
             
@@ -2029,6 +2389,34 @@ Please incorporate this company information naturally throughout the document to
                         data[col_name] = [f"GenAI_Placeholder_{i}" for i in range(row_count)]
                     else:
                         data[col_name] = [""] * row_count
+                elif col_type == 'Custom Values':
+                    # For Custom Values, use values and optional weights with random selection
+                    custom_values = col.get('custom_values', [''])
+                    use_weights = col.get('use_weights', False)
+                    custom_weights = col.get('custom_weights', [1])
+                    
+                    # Filter out empty values
+                    filtered_values = [v for v in custom_values if v.strip()]
+                    if not filtered_values:
+                        filtered_values = ['DefaultValue']  # Fallback if all values are empty
+                    
+                    if use_weights and len(custom_weights) >= len(filtered_values):
+                        # Use weights for random selection
+                        filtered_weights = custom_weights[:len(filtered_values)]
+                        # Normalize weights
+                        total_weight = sum(filtered_weights)
+                        if total_weight > 0:
+                            probabilities = [w / total_weight for w in filtered_weights]
+                        else:
+                            probabilities = [1.0 / len(filtered_values)] * len(filtered_values)
+                        
+                        data[col_name] = [
+                            random.choices(filtered_values, weights=probabilities)[0] 
+                            for _ in range(row_count)
+                        ]
+                    else:
+                        # Use uniform random selection without weights
+                        data[col_name] = [random.choice(filtered_values) for _ in range(row_count)]
             
             # Only include user-specified columns (no automatic company columns)
             
