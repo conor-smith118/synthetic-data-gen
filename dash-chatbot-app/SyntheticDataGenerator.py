@@ -834,8 +834,9 @@ class SyntheticDataGenerator:
                             "+ Add Value",
                             id={'type': 'add-custom-value', 'op': config_id['op'], 'col': config_id['col']},
                             size="sm",
-                            color="secondary",
-                            outline=True
+                            color="primary",
+                            outline=False,
+                            disabled=False
                         )
                     ], width=12)
                 ], className="mt-2"))
@@ -863,13 +864,12 @@ class SyntheticDataGenerator:
         @self.app.callback(
             [Output({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'children'),
              Output({'type': 'use-weights-checkbox', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'style')],
-            [Input({'type': 'add-custom-value', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'n_clicks'),
-             Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'value')],
-            [State({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'id'),
-             State('operations-store', 'data')],
+            [Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'value'),
+             Input('operations-store', 'data')],  # Listen to operations store changes instead
+            [State({'type': 'custom-values-container', 'op': dash.dependencies.MATCH, 'col': dash.dependencies.MATCH}, 'id')],
             prevent_initial_call=False
         )
-        def update_custom_values_container(add_clicks, weights_checked, container_id, operations):
+        def update_custom_values_container(weights_checked, operations, container_id):
             if not operations:
                 return [], {'display': 'none'}
             
@@ -970,19 +970,32 @@ class SyntheticDataGenerator:
             prevent_initial_call=True
         )
         def add_custom_value(n_clicks_list, operations):
-            if not operations or not any(n_clicks_list):
+            print(f"Add custom value callback triggered. n_clicks_list: {n_clicks_list}")
+            
+            if not operations:
+                print("No operations found")
+                return dash.no_update
+                
+            if not any(n_clicks_list):
+                print("No clicks detected")
                 return dash.no_update
             
             ctx = callback_context
             if not ctx.triggered:
+                print("No context triggered")
                 return dash.no_update
+            
+            print(f"Context triggered: {ctx.triggered}")
             
             try:
                 import json
                 triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                print(f"Triggered ID: {triggered_id}")
                 triggered_comp = json.loads(triggered_id)
                 op_id = triggered_comp['op']
                 col_id = triggered_comp['col']
+                
+                print(f"Looking for op_id: {op_id}, col_id: {col_id}")
                 
                 # Find the operation and column, add a new custom value
                 for op in operations:
@@ -990,8 +1003,11 @@ class SyntheticDataGenerator:
                         columns = op['config'].get('columns', [])
                         for col in columns:
                             if col['id'] == col_id and col.get('data_type') == 'Custom Values':
+                                print(f"Found matching column: {col['name']}")
                                 custom_values = col.get('custom_values', [''])
                                 custom_weights = col.get('custom_weights', [1])
+                                
+                                print(f"Before: custom_values={custom_values}")
                                 
                                 # Add new empty value and default weight
                                 custom_values.append('')
@@ -999,12 +1015,16 @@ class SyntheticDataGenerator:
                                 
                                 col['custom_values'] = custom_values
                                 col['custom_weights'] = custom_weights
+                                
+                                print(f"After: custom_values={custom_values}")
                                 break
                         break
                 
                 return operations
             except Exception as e:
                 print(f"Error adding custom value: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return dash.no_update
         
         # Remove custom value callback
@@ -1304,8 +1324,9 @@ class SyntheticDataGenerator:
                                 "+ Add Value",
                                 id={'type': 'add-custom-value', 'op': op_id, 'col': col_id},
                                 size="sm",
-                                color="secondary",
-                                outline=True
+                                color="primary",
+                                outline=False,
+                                disabled=False
                             )
                         ], width=12)
                     ], className="mt-2"),
