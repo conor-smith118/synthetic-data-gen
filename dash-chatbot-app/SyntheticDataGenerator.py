@@ -901,67 +901,6 @@ class SyntheticDataGenerator:
             
             return self._create_custom_values_inputs(custom_values, custom_weights, use_weights, op_id, col_id), checkbox_style
 
-    def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
-        """Create input fields for custom values and optional weights."""
-        children = []
-        
-        for i, (value, weight) in enumerate(zip(custom_values, custom_weights)):
-            row_children = []
-            
-            # Value input
-            if use_weights:
-                # Value input takes 8 columns, weight takes 3, remove button takes 1
-                row_children.append(dbc.Col([
-                    dbc.Input(
-                        id={'type': 'custom-value-input', 'op': op_id, 'col': col_id, 'idx': i},
-                        placeholder=f"Value {i+1}",
-                        value=value,
-                        debounce=True
-                    )
-                ], width=8))
-                
-                # Weight input
-                row_children.append(dbc.Col([
-                    dbc.Input(
-                        id={'type': 'custom-weight-input', 'op': op_id, 'col': col_id, 'idx': i},
-                        type="number",
-                        placeholder="Weight",
-                        value=weight,
-                        min=0.1,
-                        step=0.1,
-                        debounce=True
-                    )
-                ], width=3))
-            else:
-                # Value input takes 11 columns, remove button takes 1
-                row_children.append(dbc.Col([
-                    dbc.Input(
-                        id={'type': 'custom-value-input', 'op': op_id, 'col': col_id, 'idx': i},
-                        placeholder=f"Value {i+1}",
-                        value=value,
-                        debounce=True
-                    )
-                ], width=11))
-            
-            # Remove button (only show if more than 1 value)
-            if len(custom_values) > 1:
-                row_children.append(dbc.Col([
-                    dbc.Button(
-                        "×",
-                        id={'type': 'remove-custom-value', 'op': op_id, 'col': col_id, 'idx': i},
-                        size="sm",
-                        color="danger",
-                        outline=True
-                    )
-                ], width=1))
-            else:
-                # Empty column to maintain alignment
-                row_children.append(dbc.Col([], width=1))
-            
-            children.append(dbc.Row(row_children, className="mb-2"))
-        
-        return children
-        
         # Add custom value callback
         @self.app.callback(
             Output('operations-store', 'data', allow_duplicate=True),
@@ -1074,6 +1013,67 @@ class SyntheticDataGenerator:
             except Exception as e:
                 print(f"Error removing custom value: {str(e)}")
                 return dash.no_update
+
+    def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
+        """Create input fields for custom values and optional weights."""
+        children = []
+        
+        for i, (value, weight) in enumerate(zip(custom_values, custom_weights)):
+            row_children = []
+            
+            # Value input
+            if use_weights:
+                # Value input takes 8 columns, weight takes 3, remove button takes 1
+                row_children.append(dbc.Col([
+                    dbc.Input(
+                        id={'type': 'custom-value-input', 'op': op_id, 'col': col_id, 'idx': i},
+                        placeholder=f"Value {i+1}",
+                        value=value,
+                        debounce=True
+                    )
+                ], width=8))
+                
+                # Weight input
+                row_children.append(dbc.Col([
+                    dbc.Input(
+                        id={'type': 'custom-weight-input', 'op': op_id, 'col': col_id, 'idx': i},
+                        type="number",
+                        placeholder="Weight",
+                        value=weight,
+                        min=0.1,
+                        step=0.1,
+                        debounce=True
+                    )
+                ], width=3))
+            else:
+                # Value input takes 11 columns, remove button takes 1
+                row_children.append(dbc.Col([
+                    dbc.Input(
+                        id={'type': 'custom-value-input', 'op': op_id, 'col': col_id, 'idx': i},
+                        placeholder=f"Value {i+1}",
+                        value=value,
+                        debounce=True
+                    )
+                ], width=11))
+            
+            # Remove button (only show if more than 1 value)
+            if len(custom_values) > 1:
+                row_children.append(dbc.Col([
+                    dbc.Button(
+                        "×",
+                        id={'type': 'remove-custom-value', 'op': op_id, 'col': col_id, 'idx': i},
+                        size="sm",
+                        color="danger",
+                        outline=True
+                    )
+                ], width=1))
+            else:
+                # Empty column to maintain alignment
+                row_children.append(dbc.Col([], width=1))
+            
+            children.append(dbc.Row(row_children, className="mb-2"))
+        
+        return children
 
     def _create_operation_card(self, operation):
         """Create a card for configuring an operation."""
