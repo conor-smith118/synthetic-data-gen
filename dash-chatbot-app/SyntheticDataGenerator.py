@@ -1866,10 +1866,19 @@ Only return the JSON array, no other text."""
             
             # Try to import from local config file first, fallback to environment variables
             try:
+                import sys
+                import os
+                # Add the current directory to Python path so we can import config
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                if current_dir not in sys.path:
+                    sys.path.append(current_dir)
+                
                 from config import DATABRICKS_API_KEY, DATABRICKS_HOST
                 api_key = DATABRICKS_API_KEY
                 base_url = f"{DATABRICKS_HOST}/serving-endpoints"
-            except ImportError:
+                print(f"✅ Using API key from config.py")
+            except (ImportError, ModuleNotFoundError) as e:
+                print(f"⚠️ Config file not found ({e}), falling back to environment variables")
                 # Fallback to environment variables
                 api_key = os.environ.get('DATABRICKS_TOKEN')
                 base_url = f"{os.environ.get('DATABRICKS_HOST', 'https://e2-demo-field-eng.cloud.databricks.com')}/serving-endpoints"
