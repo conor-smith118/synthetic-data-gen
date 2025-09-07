@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from databricks.sdk import WorkspaceClient
@@ -345,6 +345,7 @@ class SyntheticDataGenerator:
             [Input({'type': 'pdf-description', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'pdf-doc-type', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'pdf-count', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'pdf-include-images', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-description', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-doc-type', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-format', 'index': dash.dependencies.ALL}, 'value'),
@@ -480,6 +481,8 @@ class SyntheticDataGenerator:
                                 op['config']['doc_type'] = new_value
                             elif comp_type == 'pdf-count':
                                 op['config']['count'] = new_value
+                            elif comp_type == 'pdf-include-images':
+                                op['config']['include_images'] = 'include_images' in (new_value or [])
                             elif comp_type == 'text-description':
                                 op['config']['description'] = new_value
                             elif comp_type == 'text-doc-type':
@@ -1192,7 +1195,20 @@ class SyntheticDataGenerator:
                     value=config.get('count', 1),
                     marks={i: str(i) for i in range(1, 11)},
                     className="mb-3"
-                )
+                ),
+                html.Div([
+                    dbc.Checklist(
+                        id={'type': 'pdf-include-images', 'index': op_id},
+                        options=[
+                            {'label': ' Include AI-Generated Images', 'value': 'include_images'}
+                        ],
+                        value=['include_images'] if config.get('include_images', False) else [],
+                        inline=True,
+                        className="mb-2"
+                    ),
+                    html.Small("Generate 3 contextual images based on document content", 
+                              className="text-muted d-block")
+                ], className="mb-3")
             ]
         elif op_type == 'text':
             config_inputs = [
@@ -1520,13 +1536,14 @@ class SyntheticDataGenerator:
         doc_type = config.get('doc_type', 'policy_guide')
         description = config.get('description', 'Sample document')
         count = config.get('count', 1)
+        include_images = config.get('include_images', False)
         
         items = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         for i in range(count):
             enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
-            item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}")
+            item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, include_images)
             items.append(item)
         
         return items
@@ -1765,6 +1782,292 @@ Generate a complete customer profile with realistic data (use fictional informat
                         # Last resort: skip this paragraph
                         print(f"Skipping problematic paragraph: {para[:100]}...")
                         continue
+        
+        # Build PDF
+        doc.build(story)
+        
+        return pdf_path
+    
+    def _generate_image_prompts(self, pdf_content):
+        """Generate 3 contextual image prompts based on PDF content using the LLM."""
+        try:
+            # Create a prompt to generate image prompts
+            system_prompt = """Based on the provided document content, generate exactly 3 descriptive image prompts that would enhance the document when included as illustrations. Each prompt should:
+
+1. Be clear and specific for image generation
+2. Relate to different sections or concepts in the document
+3. Be appropriate for a professional document
+4. Be realistic and achievable by an image generator
+
+Format your response as a JSON array with 3 strings, each being a complete image prompt. For example:
+["A professional office setting with employees reviewing policy documents", "A modern workplace showing diverse team collaboration", "An infographic-style illustration showing organizational structure"]
+
+Only return the JSON array, no other text."""
+
+            user_prompt = f"Document content:\n\n{pdf_content}\n\nGenerate 3 image prompts for this document:"
+
+            # Query the LLM for image prompts
+            response = query_endpoint(
+                self.endpoint_name,
+                system_prompt,
+                user_prompt,
+                temperature=0.7,
+                max_tokens=800
+            )
+            
+            if response:
+                # Extract and parse the response
+                content = self._extract_content_safely(response)
+                
+                # Try to parse as JSON
+                try:
+                    import json
+                    prompts = json.loads(content.strip())
+                    
+                    # Ensure we have exactly 3 prompts
+                    if isinstance(prompts, list) and len(prompts) >= 3:
+                        return prompts[:3]  # Take first 3
+                    else:
+                        print(f"Warning: LLM returned {len(prompts) if isinstance(prompts, list) else 'invalid'} prompts instead of 3")
+                        # Fallback prompts
+                        return [
+                            "A professional business document illustration with clean modern design",
+                            "Office workers collaborating on important company policies and procedures", 
+                            "A corporate meeting room with presentations and documentation on display"
+                        ]
+                        
+                except json.JSONDecodeError:
+                    print(f"Warning: Could not parse LLM response as JSON: {content[:100]}...")
+                    # Fallback prompts
+                    return [
+                        "A professional business document illustration with clean modern design",
+                        "Office workers collaborating on important company policies and procedures", 
+                        "A corporate meeting room with presentations and documentation on display"
+                    ]
+            else:
+                print("Warning: No response from LLM for image prompt generation")
+                
+        except Exception as e:
+            print(f"Error generating image prompts: {str(e)}")
+            
+        # Fallback prompts in case of any error
+        return [
+            "A professional business document illustration with clean modern design",
+            "Office workers collaborating on important company policies and procedures", 
+            "A corporate meeting room with presentations and documentation on display"
+        ]
+    
+    def _generate_images(self, image_prompts):
+        """Generate images from prompts using the serving-endpoint-image endpoint."""
+        generated_images = []
+        
+        for i, prompt in enumerate(image_prompts):
+            try:
+                print(f"🎨 Generating image {i+1}/3: {prompt[:50]}...")
+                
+                # Query the image generation endpoint
+                response = query_endpoint(
+                    "serving-endpoint-image",  # Specific image endpoint
+                    "",  # No system prompt for image generation
+                    prompt,
+                    temperature=0.7,
+                    max_tokens=1024
+                )
+                
+                if response and hasattr(response, 'data') and len(response.data) > 0:
+                    # Extract image from response.data[0].image[0]
+                    image_data = response.data[0].image[0]
+                    
+                    # Save image to local file
+                    local_dir = "./generated_documents/images"
+                    os.makedirs(local_dir, exist_ok=True)
+                    
+                    image_filename = f"image_{int(time.time())}_{i+1}.png"
+                    image_path = os.path.join(local_dir, image_filename)
+                    
+                    # Save the image data (assuming it's base64 or binary)
+                    if isinstance(image_data, str):
+                        # Base64 encoded
+                        import base64
+                        with open(image_path, 'wb') as f:
+                            f.write(base64.b64decode(image_data))
+                    else:
+                        # Binary data
+                        with open(image_path, 'wb') as f:
+                            f.write(image_data)
+                    
+                    generated_images.append({
+                        'prompt': prompt,
+                        'path': image_path,
+                        'filename': image_filename
+                    })
+                    
+                    print(f"✅ Image {i+1} saved to {image_path}")
+                    
+                else:
+                    print(f"❌ No image data received for prompt {i+1}")
+                    
+            except Exception as e:
+                print(f"❌ Error generating image {i+1}: {str(e)}")
+                continue
+                
+        return generated_images
+    
+    def _create_pdf_with_images(self, content, filename, doc_type, generated_images):
+        """Create a PDF file with generated images embedded contextually."""
+        
+        # Ensure the volume directory exists (create locally for now)
+        local_dir = "./generated_documents"
+        os.makedirs(local_dir, exist_ok=True)
+        
+        pdf_path = os.path.join(local_dir, filename)
+        
+        # Create PDF
+        doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30,
+            alignment=1  # Center alignment
+        )
+        
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=12,
+            alignment=0  # Left alignment
+        )
+        
+        image_caption_style = ParagraphStyle(
+            'ImageCaption',
+            parent=styles['Normal'],
+            fontSize=9,
+            spaceAfter=12,
+            alignment=1,  # Center alignment
+            textColor='gray'
+        )
+        
+        # Build document
+        story = []
+        
+        # Title
+        title = f"{self._format_doc_type(doc_type)} Document"
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Sanitize content for PDF generation
+        content = self._sanitize_content_for_pdf(content)
+        
+        # Split content into paragraphs for image insertion
+        paragraphs = content.split('\n\n')
+        
+        # Calculate where to insert images (distribute them evenly)
+        total_paragraphs = len([p for p in paragraphs if p.strip()])
+        if total_paragraphs > 0 and generated_images:
+            # Insert images at 1/4, 1/2, and 3/4 through the document
+            image_positions = [
+                max(1, int(total_paragraphs * 0.25)),
+                max(2, int(total_paragraphs * 0.5)),
+                max(3, int(total_paragraphs * 0.75))
+            ]
+        else:
+            image_positions = []
+        
+        paragraph_count = 0
+        image_index = 0
+        
+        # Process each paragraph and insert images at calculated positions
+        for para in paragraphs:
+            if para.strip():
+                try:
+                    # Clean the paragraph text for ReportLab
+                    para_text = para.strip()
+                    
+                    # Escape special characters that might cause ReportLab issues
+                    para_text = para_text.replace('&', '&amp;')
+                    para_text = para_text.replace('<', '&lt;')
+                    para_text = para_text.replace('>', '&gt;')
+                    
+                    # Handle headers (lines that might be section titles)
+                    if len(para_text) < 100 and para_text.endswith(':'):
+                        story.append(Paragraph(para_text, styles['Heading2']))
+                    else:
+                        story.append(Paragraph(para_text, body_style))
+                    story.append(Spacer(1, 0.1*inch))
+                    
+                    paragraph_count += 1
+                    
+                    # Check if we should insert an image after this paragraph
+                    if (image_index < len(generated_images) and 
+                        image_index < len(image_positions) and 
+                        paragraph_count >= image_positions[image_index]):
+                        
+                        image_info = generated_images[image_index]
+                        image_path = image_info['path']
+                        
+                        if os.path.exists(image_path):
+                            try:
+                                # Add some space before image
+                                story.append(Spacer(1, 0.2*inch))
+                                
+                                # Create image with appropriate sizing
+                                # Calculate size to fit within page margins (6 inches width max)
+                                img = Image(image_path, width=5*inch, height=3*inch)
+                                story.append(img)
+                                
+                                # Add image caption
+                                caption = f"Figure {image_index + 1}: Generated illustration"
+                                story.append(Paragraph(caption, image_caption_style))
+                                
+                                # Add space after image
+                                story.append(Spacer(1, 0.2*inch))
+                                
+                                print(f"📷 Inserted image {image_index + 1} after paragraph {paragraph_count}")
+                                
+                            except Exception as e:
+                                print(f"Warning: Could not insert image {image_index + 1}: {str(e)}")
+                        else:
+                            print(f"Warning: Image file not found: {image_path}")
+                        
+                        image_index += 1
+                        
+                except Exception as e:
+                    # If paragraph creation fails, add as plain text
+                    print(f"Warning: Could not create paragraph, adding as plain text: {str(e)}")
+                    # Convert to safe text and add as simple paragraph
+                    safe_text = para.strip().replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    try:
+                        story.append(Paragraph(safe_text, body_style))
+                        story.append(Spacer(1, 0.1*inch))
+                        paragraph_count += 1
+                    except:
+                        # Last resort: skip this paragraph
+                        print(f"Skipping problematic paragraph: {para[:100]}...")
+                        continue
+        
+        # Insert any remaining images at the end
+        while image_index < len(generated_images):
+            image_info = generated_images[image_index]
+            image_path = image_info['path']
+            
+            if os.path.exists(image_path):
+                try:
+                    story.append(Spacer(1, 0.2*inch))
+                    img = Image(image_path, width=5*inch, height=3*inch)
+                    story.append(img)
+                    caption = f"Figure {image_index + 1}: Generated illustration"
+                    story.append(Paragraph(caption, image_caption_style))
+                    story.append(Spacer(1, 0.2*inch))
+                    print(f"📷 Appended remaining image {image_index + 1} at document end")
+                except Exception as e:
+                    print(f"Warning: Could not insert final image {image_index + 1}: {str(e)}")
+            
+            image_index += 1
         
         # Build PDF
         doc.build(story)
@@ -2190,7 +2493,7 @@ Generate a complete customer profile with realistic data (use fictional informat
             
             if data_type == 'pdf':
                 # Generate PDF (existing functionality)
-                item_info = self._generate_pdf_item(description, company_name, company_sector, timestamp)
+                item_info = self._generate_pdf_item(description, company_name, company_sector, timestamp, 'policy_guide', False)
             elif data_type == 'text':
                 # Generate text document
                 item_info = self._generate_text_item(description, company_name, company_sector, timestamp)
@@ -2211,25 +2514,52 @@ Generate a complete customer profile with realistic data (use fictional informat
             self.generation_state['active'] = False
             self.generation_state['error'] = str(e)
 
-    def _generate_pdf_item(self, description, company_name, company_sector, timestamp):
-        """Generate a single PDF item."""
+    def _generate_pdf_item(self, description, company_name, company_sector, timestamp, doc_type='policy_guide', include_images=False):
+        """Generate a single PDF item with optional AI-generated images."""
         # Enhanced prompt with company context
         enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
         
         # Generate content using the serving endpoint
-        content = self._generate_document_content('policy_guide', enhanced_description, 1)
-        
-        # Update progress
-        self.generation_state['current_step'] = f"Creating PDF..."
+        content = self._generate_document_content(doc_type, enhanced_description, 1)
         
         # Create filename
         filename = f"synthetic_pdf_{timestamp}.pdf"
         
-        # Generate PDF
-        pdf_path = self._create_pdf(content, filename, 'pdf')
+        # Agentic workflow for image generation
+        generated_images = []
+        if include_images:
+            try:
+                # Step 1: Generate image prompts based on PDF content
+                self.generation_state['current_step'] = f"🤖 Analyzing content for image prompts..."
+                print("🧠 AGENTIC FLOW: Generating image prompts from PDF content...")
+                image_prompts = self._generate_image_prompts(content)
+                print(f"📝 Generated {len(image_prompts)} image prompts")
+                
+                # Step 2: Generate images from prompts
+                if image_prompts:
+                    self.generation_state['current_step'] = f"🎨 Generating {len(image_prompts)} AI images..."
+                    print("🎨 AGENTIC FLOW: Creating images from prompts...")
+                    generated_images = self._generate_images(image_prompts)
+                    print(f"✅ Generated {len(generated_images)} images successfully")
+                    
+            except Exception as e:
+                print(f"⚠️ Error in image generation workflow: {str(e)}")
+                print("🔄 Continuing with PDF generation without images...")
+                generated_images = []
+        
+        # Update progress
+        self.generation_state['current_step'] = f"📄 Creating PDF{' with images' if generated_images else ''}..."
+        
+        # Generate PDF with or without images
+        if generated_images:
+            print(f"📋 Creating PDF with {len(generated_images)} embedded images...")
+            pdf_path = self._create_pdf_with_images(content, filename, doc_type, generated_images)
+        else:
+            print("📄 Creating standard PDF...")
+            pdf_path = self._create_pdf(content, filename, doc_type)
         
         # Update progress and save to volume
-        self.generation_state['current_step'] = f"Saving PDF to volume..."
+        self.generation_state['current_step'] = f"💾 Saving PDF to volume..."
         
         try:
             self._save_to_volume(pdf_path, filename)
@@ -2247,7 +2577,9 @@ Generate a complete customer profile with realistic data (use fictional informat
             'company_name': company_name,
             'company_sector': company_sector,
             'size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0,
-            'saved_to_volume': save_success
+            'saved_to_volume': save_success,
+            'include_images': include_images,
+            'images_generated': len(generated_images)
         }
 
     def _generate_text_item(self, description, company_name, company_sector, timestamp, doc_type, file_format):
