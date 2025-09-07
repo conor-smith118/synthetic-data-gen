@@ -1858,38 +1858,27 @@ Only return the JSON array, no other text."""
         ]
     
     def _generate_images(self, image_prompts):
-        """Generate images from prompts using the Databricks image generation endpoint."""
+        """Generate images from prompts using the Databricks serving endpoint."""
         generated_images = []
         
         try:
-            # Import OpenAI client
-            from openai import OpenAI
+            # Import Databricks SDK
+            from databricks.sdk import WorkspaceClient
             
-            # Get Databricks token from environment
-            databricks_token = os.environ.get('DATABRICKS_TOKEN')
-            databricks_host = os.environ.get('DATABRICKS_HOST', 'https://e2-demo-field-eng.cloud.databricks.com')
-            
-            if not databricks_token:
-                print("❌ DATABRICKS_TOKEN environment variable not set for image generation")
-                return []
-            
-            # Initialize OpenAI client for Databricks
-            client = OpenAI(
-                api_key=databricks_token,
-                base_url=f"{databricks_host}/serving-endpoints"
-            )
+            # Initialize Databricks WorkspaceClient
+            w = WorkspaceClient()
             
             for i, prompt in enumerate(image_prompts):
                 try:
                     print(f"🎨 Generating image {i+1}/3: {prompt[:50]}...")
                     
-                    # Generate image using OpenAI client pattern
-                    response = client.images.generate(
-                        model="serving-endpoint-image",
+                    # Generate image using Databricks serving endpoint
+                    response = w.serving_endpoints.query(
+                        name="serving-endpoint-image",
                         prompt=prompt
                     )
                     
-                    if response and response.data and len(response.data) > 0:
+                    if response and hasattr(response, 'data') and len(response.data) > 0:
                         # Extract image from response.data[0].image[0]
                         image_data = response.data[0].image[0]
                         
@@ -1927,7 +1916,7 @@ Only return the JSON array, no other text."""
                     continue
                     
         except ImportError:
-            print("❌ OpenAI library not available for image generation")
+            print("❌ Databricks SDK not available for image generation")
             return []
         except Exception as e:
             print(f"❌ Error setting up image generation client: {str(e)}")
