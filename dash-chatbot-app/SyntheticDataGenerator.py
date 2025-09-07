@@ -1949,38 +1949,94 @@ Only return the JSON array, no other text."""
                         prompt=prompt  # Uses the actual contextual prompt, not hardcoded test
                     )
                     
+                    # Debug: Log the response structure
+                    print(f"🔍 Response type: {type(response)}")
+                    print(f"🔍 Response attributes: {dir(response)}")
+                    if hasattr(response, 'data'):
+                        print(f"🔍 Response.data type: {type(response.data)}")
+                        print(f"🔍 Response.data length: {len(response.data)}")
+                        if len(response.data) > 0:
+                            print(f"🔍 First data item type: {type(response.data[0])}")
+                            print(f"🔍 First data item attributes: {dir(response.data[0])}")
+                    
                     if response and hasattr(response, 'data') and len(response.data) > 0:
-                        # Extract image from response.data[0].image[0]
-                        image_data = response.data[0].image[0]
+                        # Try different ways to extract image data
+                        first_item = response.data[0]
                         
-                        # Save image to local file
-                        local_dir = "./generated_documents/images"
-                        os.makedirs(local_dir, exist_ok=True)
-                        
-                        image_filename = f"image_{int(time.time())}_{i+1}.png"
-                        image_path = os.path.join(local_dir, image_filename)
-                        
-                        # Save the image data (assuming it's base64 encoded)
-                        if isinstance(image_data, str):
-                            # Base64 encoded
-                            import base64
-                            with open(image_path, 'wb') as f:
-                                f.write(base64.b64decode(image_data))
+                        # Try multiple possible response structures
+                        image_data = None
+                        if hasattr(first_item, 'b64_json'):
+                            print("✅ Found b64_json attribute")
+                            image_data = first_item.b64_json
+                        elif hasattr(first_item, 'url'):
+                            print("✅ Found url attribute") 
+                            image_data = first_item.url
+                        elif hasattr(first_item, 'image'):
+                            print("✅ Found image attribute")
+                            if isinstance(first_item.image, list) and len(first_item.image) > 0:
+                                image_data = first_item.image[0]
+                            else:
+                                image_data = first_item.image
                         else:
-                            # Binary data
-                            with open(image_path, 'wb') as f:
-                                f.write(image_data)
+                            print("❌ No recognized image data attributes found")
+                            print(f"Available attributes: {[attr for attr in dir(first_item) if not attr.startswith('_')]}")
+                            continue
                         
-                        generated_images.append({
-                            'prompt': prompt,
-                            'path': image_path,
-                            'filename': image_filename
-                        })
-                        
-                        print(f"✅ Image {i+1} saved to {image_path}")
+                        if image_data:
+                            # Save image to local file
+                            local_dir = "./generated_documents/images"
+                            os.makedirs(local_dir, exist_ok=True)
+                            
+                            image_filename = f"image_{int(time.time())}_{i+1}.png"
+                            image_path = os.path.join(local_dir, image_filename)
+                            
+                            print(f"💾 Saving image data type: {type(image_data)}")
+                            print(f"💾 Image data preview: {str(image_data)[:100]}...")
+                            
+                            # Save the image data with improved handling
+                            try:
+                                if isinstance(image_data, str):
+                                    if image_data.startswith('http'):
+                                        # It's a URL, download the image
+                                        print("🌐 Downloading image from URL...")
+                                        import requests
+                                        response = requests.get(image_data)
+                                        with open(image_path, 'wb') as f:
+                                            f.write(response.content)
+                                    else:
+                                        # Base64 encoded
+                                        print("🔤 Decoding base64 image data...")
+                                        import base64
+                                        # Remove data URL prefix if present
+                                        if ',' in image_data:
+                                            image_data = image_data.split(',', 1)[1]
+                                        with open(image_path, 'wb') as f:
+                                            f.write(base64.b64decode(image_data))
+                                else:
+                                    # Binary data
+                                    print("📦 Writing binary image data...")
+                                    with open(image_path, 'wb') as f:
+                                        f.write(image_data)
+                                
+                                generated_images.append({
+                                    'prompt': prompt,
+                                    'path': image_path,
+                                    'filename': image_filename
+                                })
+                                
+                                print(f"✅ Image {i+1} saved to {image_path}")
+                                
+                            except Exception as save_error:
+                                print(f"❌ Error saving image {i+1}: {save_error}")
+                        else:
+                            print(f"❌ No image data extracted for prompt {i+1}")
                         
                     else:
-                        print(f"❌ No image data received for prompt {i+1}")
+                        print(f"❌ No valid response received for prompt {i+1}")
+                        if response:
+                            print(f"Response has data: {hasattr(response, 'data')}")
+                            if hasattr(response, 'data'):
+                                print(f"Data length: {len(response.data) if response.data else 0}")
                         
                 except Exception as e:
                     print(f"❌ Error generating image {i+1}: {str(e)}")
