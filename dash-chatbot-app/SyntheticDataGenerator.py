@@ -1862,20 +1862,34 @@ Only return the JSON array, no other text."""
         generated_images = []
         
         try:
-            # Import Databricks SDK
-            from databricks.sdk import WorkspaceClient
+            from openai import OpenAI
             
-            # Initialize Databricks WorkspaceClient
-            w = WorkspaceClient()
+            # Try to import from local config file first, fallback to environment variables
+            try:
+                from config import DATABRICKS_API_KEY, DATABRICKS_HOST
+                api_key = DATABRICKS_API_KEY
+                base_url = f"{DATABRICKS_HOST}/serving-endpoints"
+            except ImportError:
+                # Fallback to environment variables
+                api_key = os.environ.get('DATABRICKS_TOKEN')
+                base_url = f"{os.environ.get('DATABRICKS_HOST', 'https://e2-demo-field-eng.cloud.databricks.com')}/serving-endpoints"
+                if not api_key:
+                    print("❌ No API key found in config.py or DATABRICKS_TOKEN environment variable")
+                    return []
+
+            client = OpenAI(
+                api_key=api_key,
+                base_url=base_url
+            )
+
             
             for i, prompt in enumerate(image_prompts):
                 try:
                     print(f"🎨 Generating image {i+1}/3: {prompt[:50]}...")
-                    
-                    # Generate image using Databricks serving endpoint
-                    response = w.serving_endpoints.query(
-                        name="serving-endpoint-image",
-                        prompt=prompt
+
+                    response = client.images.generate(
+                        model="databricks-shutterstock-imageai",
+                        prompt=prompt  # Uses the actual contextual prompt, not hardcoded test
                     )
                     
                     if response and hasattr(response, 'data') and len(response.data) > 0:
@@ -1916,7 +1930,7 @@ Only return the JSON array, no other text."""
                     continue
                     
         except ImportError:
-            print("❌ Databricks SDK not available for image generation")
+            print("❌ OpenAI library not available for image generation")
             return []
         except Exception as e:
             print(f"❌ Error setting up image generation client: {str(e)}")
