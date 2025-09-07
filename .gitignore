@@ -140,4 +140,3 @@ ml-models.ipr
 .DS_Store
 .databricks
 .gradio
-dash-chatbot-app/config.py
