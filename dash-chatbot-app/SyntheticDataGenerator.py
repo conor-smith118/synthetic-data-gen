@@ -2051,6 +2051,44 @@ Only return the JSON array, no other text."""
                 
         return generated_images
     
+    def _create_intelligent_caption(self, image_prompt, figure_number):
+        """Create an intelligent caption based on the image prompt."""
+        try:
+            # Extract key elements from the prompt to create a natural caption
+            prompt_lower = image_prompt.lower()
+            
+            # Common themes and their caption templates
+            if 'office' in prompt_lower and ('meeting' in prompt_lower or 'collaboration' in prompt_lower):
+                return f"Figure {figure_number}: Professional team collaboration in a modern office environment"
+            elif 'office' in prompt_lower and 'setting' in prompt_lower:
+                return f"Figure {figure_number}: Contemporary office workspace and business environment" 
+            elif 'workplace' in prompt_lower and 'diverse' in prompt_lower:
+                return f"Figure {figure_number}: Diverse team members working together in a collaborative setting"
+            elif 'meeting' in prompt_lower and ('room' in prompt_lower or 'conference' in prompt_lower):
+                return f"Figure {figure_number}: Corporate meeting room with professional presentation setup"
+            elif 'policy' in prompt_lower and 'document' in prompt_lower:
+                return f"Figure {figure_number}: Professional documentation and policy review process"
+            elif 'business' in prompt_lower and 'professional' in prompt_lower:
+                return f"Figure {figure_number}: Professional business environment and corporate atmosphere"
+            elif 'infographic' in prompt_lower or 'structure' in prompt_lower:
+                return f"Figure {figure_number}: Visual representation of organizational structure and processes"
+            elif 'corporate' in prompt_lower:
+                return f"Figure {figure_number}: Corporate business environment and professional workspace"
+            else:
+                # Fallback: create a generic but descriptive caption
+                # Extract first few meaningful words
+                words = image_prompt.split()
+                key_words = [w for w in words[:6] if w.lower() not in ['a', 'an', 'the', 'of', 'in', 'at', 'to', 'for', 'with']]
+                if len(key_words) >= 3:
+                    description = ' '.join(key_words[:4]).lower()
+                    return f"Figure {figure_number}: Illustration depicting {description}"
+                else:
+                    return f"Figure {figure_number}: Professional business illustration"
+                    
+        except Exception as e:
+            print(f"Warning: Error creating caption: {e}")
+            return f"Figure {figure_number}: Professional business illustration"
+    
     def _create_pdf_with_images(self, content, filename, doc_type, generated_images):
         """Create a PDF file with generated images embedded contextually."""
         
@@ -2060,43 +2098,100 @@ Only return the JSON array, no other text."""
         
         pdf_path = os.path.join(local_dir, filename)
         
-        # Create PDF
-        doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+        # Create PDF with better margins and layout
+        doc = SimpleDocTemplate(
+            pdf_path, 
+            pagesize=letter,
+            leftMargin=1*inch,
+            rightMargin=1*inch,
+            topMargin=1*inch,
+            bottomMargin=1*inch
+        )
         styles = getSampleStyleSheet()
         
-        # Custom styles
+        # Enhanced custom styles for professional appearance
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
-            fontSize=16,
-            spaceAfter=30,
-            alignment=1  # Center alignment
+            fontSize=20,
+            spaceAfter=36,
+            spaceBefore=12,
+            alignment=1,  # Center alignment
+            fontName='Helvetica-Bold',
+            textColor='#2E3440'
+        )
+        
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=styles['Heading2'],
+            fontSize=14,
+            spaceAfter=18,
+            spaceBefore=24,
+            alignment=0,  # Left alignment
+            fontName='Helvetica-Bold',
+            textColor='#3B4252'
         )
         
         body_style = ParagraphStyle(
             'CustomBody',
             parent=styles['Normal'],
-            fontSize=11,
-            spaceAfter=12,
-            alignment=0  # Left alignment
+            fontSize=12,
+            spaceAfter=14,
+            spaceBefore=2,
+            alignment=4,  # Justified alignment
+            fontName='Helvetica',
+            leftIndent=0,
+            rightIndent=0,
+            firstLineIndent=0,
+            leading=16,  # Line spacing
+            textColor='#2E3440'
+        )
+        
+        # Special style for bullet points and lists
+        list_style = ParagraphStyle(
+            'CustomList',
+            parent=body_style,
+            fontSize=12,
+            spaceAfter=8,
+            spaceBefore=4,
+            leftIndent=20,
+            bulletIndent=10,
+            leading=15
         )
         
         image_caption_style = ParagraphStyle(
             'ImageCaption',
             parent=styles['Normal'],
-            fontSize=9,
-            spaceAfter=12,
+            fontSize=10,
+            spaceAfter=16,
+            spaceBefore=8,
             alignment=1,  # Center alignment
-            textColor='gray'
+            fontName='Helvetica-Oblique',
+            textColor='#5E81AC'
         )
         
         # Build document
         story = []
         
-        # Title
+        # Add document header with company info and date
+        from datetime import datetime
+        current_date = datetime.now().strftime("%B %d, %Y")
+        
+        header_info = f"Generated on {current_date}"
+        header_style = ParagraphStyle(
+            'HeaderInfo',
+            parent=styles['Normal'],
+            fontSize=9,
+            alignment=2,  # Right alignment
+            textColor='#5E81AC',
+            spaceAfter=20
+        )
+        story.append(Paragraph(header_info, header_style))
+        
+        # Title with better spacing
         title = f"{self._format_doc_type(doc_type)} Document"
         story.append(Paragraph(title, title_style))
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.3*inch))
         
         # Sanitize content for PDF generation
         content = self._sanitize_content_for_pdf(content)
@@ -2131,12 +2226,26 @@ Only return the JSON array, no other text."""
                     para_text = para_text.replace('<', '&lt;')
                     para_text = para_text.replace('>', '&gt;')
                     
-                    # Handle headers (lines that might be section titles)
-                    if len(para_text) < 100 and para_text.endswith(':'):
-                        story.append(Paragraph(para_text, styles['Heading2']))
+                    # Improved paragraph handling with better formatting
+                    # Detect different paragraph types for better styling
+                    if len(para_text) < 80 and (para_text.endswith(':') or para_text.isupper()):
+                        # Section headers
+                        story.append(Paragraph(para_text, subtitle_style))
+                    elif para_text.startswith('•') or para_text.startswith('-') or para_text.startswith('*'):
+                        # Bullet points
+                        story.append(Paragraph(para_text, list_style))
+                    elif len(para_text) < 120 and any(word in para_text.lower() for word in ['policy', 'procedure', 'guideline', 'section', 'article']):
+                        # Policy/procedure headers
+                        story.append(Paragraph(para_text, subtitle_style))
                     else:
+                        # Regular body text
                         story.append(Paragraph(para_text, body_style))
-                    story.append(Spacer(1, 0.1*inch))
+                    
+                    # Conditional spacing based on paragraph type
+                    if len(para_text) < 80 and (para_text.endswith(':') or para_text.isupper()):
+                        story.append(Spacer(1, 0.15*inch))  # More space after headers
+                    else:
+                        story.append(Spacer(1, 0.08*inch))  # Standard spacing
                     
                     paragraph_count += 1
                     
@@ -2158,8 +2267,9 @@ Only return the JSON array, no other text."""
                                 img = Image(image_path, width=5*inch, height=3*inch)
                                 story.append(img)
                                 
-                                # Add image caption
-                                caption = f"Figure {image_index + 1}: Generated illustration"
+                                # Add intelligent image caption based on the prompt
+                                image_prompt = image_info['prompt']
+                                caption = self._create_intelligent_caption(image_prompt, image_index + 1)
                                 story.append(Paragraph(caption, image_caption_style))
                                 
                                 # Add space after image
@@ -2198,7 +2308,9 @@ Only return the JSON array, no other text."""
                     story.append(Spacer(1, 0.2*inch))
                     img = Image(image_path, width=5*inch, height=3*inch)
                     story.append(img)
-                    caption = f"Figure {image_index + 1}: Generated illustration"
+                    # Add intelligent caption for end-of-document images too
+                    image_prompt = image_info['prompt']
+                    caption = self._create_intelligent_caption(image_prompt, image_index + 1)
                     story.append(Paragraph(caption, image_caption_style))
                     story.append(Spacer(1, 0.2*inch))
                     print(f"📷 Appended remaining image {image_index + 1} at document end")
