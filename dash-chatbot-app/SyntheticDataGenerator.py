@@ -2344,7 +2344,7 @@ Please incorporate this company information naturally throughout the document to
                 print(f"⚠️  TABULAR GENERATION: PySpark not available ({e})")
                 print("🔄 FALLBACK: Using Pandas implementation")
                 print(f"   - Row count: {row_count}")
-                print("   - GenAI Text limited to first 10 rows, then repeats")
+                print("   - GenAI Text will generate unique content for ALL rows")
                 # If PySpark is not available, create a simple CSV as fallback
                 return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
             
@@ -2471,7 +2471,10 @@ Please incorporate this company information naturally throughout the document to
             }
             
         except Exception as e:
-            print(f"Error generating tabular data: {str(e)}")
+            print(f"⚠️  TABULAR GENERATION: Spark failed ({str(e)})")
+            print("🔄 FALLBACK: Using Pandas implementation")
+            print(f"   - Row count: {row_count}")
+            print("   - GenAI Text will generate unique content for ALL rows")
             # Fallback to simple CSV generation
             return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
 
@@ -2479,7 +2482,7 @@ Please incorporate this company information naturally throughout the document to
         """Fallback method to generate tabular data without Spark."""
         print("🔄 PANDAS FALLBACK: Starting fallback tabular generation")
         print(f"   - Row count: {row_count}")
-        print(f"   - GenAI Text will be limited to first 10 rows, then duplicated")
+        print(f"   - GenAI Text will generate unique content for ALL rows")
         
         try:
             import pandas as pd
@@ -2553,7 +2556,7 @@ Please incorporate this company information naturally throughout the document to
             genai_columns = [col for col in columns if col.get('data_type') == 'GenAI Text']
             if genai_columns:
                 print(f"🤖 PANDAS FALLBACK AI: Processing {len(genai_columns)} GenAI Text column(s)")
-                print(f"   ⚠️  LIMITED: Will only generate unique content for first 10 rows")
+                print(f"   ✅ UNLIMITED: Will generate unique content for ALL {row_count} rows")
             
             for col in columns:
                 col_name = col.get('name', 'unnamed_column')
@@ -2562,14 +2565,15 @@ Please incorporate this company information naturally throughout the document to
                 if col_type == 'GenAI Text':
                     prompt_template = col.get('prompt', '')
                     if prompt_template:
-                        batch_size = min(10, row_count)  # Limit API calls for fallback
-                        print(f"   - Column '{col_name}': Generating {batch_size} unique texts, duplicating remainder")
+                        print(f"   - Column '{col_name}': Generating unique AI text for ALL {row_count} rows")
+                        if row_count > 25:
+                            print(f"   ⏱️  NOTE: This will make {row_count} individual API calls - may take a while")
                         self.generation_state['current_step'] = f"Generating AI text for column '{col_name}'..."
                         
-                        # Generate text for each row (for fallback, we'll limit to reasonable amounts)
+                        # Generate text for each row - no longer limiting API calls
                         ai_texts = []
                         
-                        for i in range(min(batch_size, row_count)):
+                        for i in range(row_count):
                             try:
                                 # Get current row data for column substitution
                                 row_data = {col: df.iloc[i][col] for col in df.columns if col in df.columns}
@@ -2599,12 +2603,8 @@ Please incorporate this company information naturally throughout the document to
                                 print(f"Error generating AI text for row {i}: {str(e)}")
                                 ai_texts.append(f"Error generating text: {str(e)}")
                         
-                        # Fill remaining rows with the last generated text (for demo purposes)
-                        while len(ai_texts) < row_count:
-                            ai_texts.append(ai_texts[-1] if ai_texts else "No text generated")
-                        
-                        # Update the DataFrame column
-                        df[col_name] = ai_texts[:row_count]
+                        # Update the DataFrame column with all generated texts
+                        df[col_name] = ai_texts
             
             # Save to CSV
             filename = f"{table_name}_{timestamp}.csv"
