@@ -1870,10 +1870,23 @@ Only return the JSON array, no other text."""
             
             # Try to read config.py file directly
             try:
-                config_path = os.path.join(os.path.dirname(__file__), 'config.py')
-                print(f"🔍 Looking for config at: {config_path}")
+                # Try multiple possible locations for config.py
+                possible_paths = [
+                    os.path.join(os.path.dirname(__file__), 'config.py'),  # Same directory as this file
+                    os.path.join(os.getcwd(), 'config.py'),  # Current working directory
+                    os.path.join(os.getcwd(), 'dash-chatbot-app', 'config.py'),  # In dash-chatbot-app subdir
+                    '/app/python/source_code/dash-chatbot-app/config.py',  # Explicit Databricks path
+                ]
                 
-                if os.path.exists(config_path):
+                config_path = None
+                for path in possible_paths:
+                    print(f"🔍 Checking config at: {path}")
+                    if os.path.exists(path):
+                        config_path = path
+                        print(f"📁 Found config file at: {path}")
+                        break
+                
+                if config_path:
                     print("📁 Config file found, reading...")
                     # Read and parse the config file manually
                     with open(config_path, 'r') as f:
@@ -1892,7 +1905,20 @@ Only return the JSON array, no other text."""
                     else:
                         print("⚠️ Config file found but no API key extracted")
                 else:
-                    print("⚠️ Config file not found at expected path")
+                    print("⚠️ Config file not found at any expected path")
+                    print("📋 Checked paths:")
+                    for path in possible_paths:
+                        print(f"   - {path}")
+                        
+                    # Also list the actual contents of the directories we checked
+                    print("📂 Directory listings:")
+                    for path in [os.path.dirname(p) for p in possible_paths[:3]]:  # Skip the explicit path
+                        try:
+                            if os.path.exists(path):
+                                files = os.listdir(path)
+                                print(f"   {path}: {files[:10]}...")  # Show first 10 files
+                        except Exception as e:
+                            print(f"   {path}: Error listing ({e})")
             except Exception as e:
                 print(f"⚠️ Error reading config file ({e})")
             
