@@ -1789,9 +1789,11 @@ Generate a complete customer profile with realistic data (use fictional informat
         return pdf_path
     
     def _generate_image_prompts(self, pdf_content):
-        """Generate 3 contextual image prompts based on PDF content using the LLM."""
+        """Generate 3 contextual image prompts based on PDF content using structured JSON response."""
         try:
-            # Create a prompt to generate image prompts
+            from mlflow.deployments import get_deploy_client
+            
+            # Create a prompt to generate image prompts with structured JSON response
             system_prompt = """Based on the provided document content, generate exactly 3 descriptive image prompts that would enhance the document when included as illustrations. Each prompt should:
 
 1. Be clear and specific for image generation
@@ -1799,58 +1801,96 @@ Generate a complete customer profile with realistic data (use fictional informat
 3. Be appropriate for a professional document
 4. Be realistic and achievable by an image generator
 
-Format your response as a JSON array with 3 strings, each being a complete image prompt. For example:
-["A professional office setting with employees reviewing policy documents", "A modern workplace showing diverse team collaboration", "An infographic-style illustration showing organizational structure"]
+You must respond with a JSON object containing exactly three image prompts."""
 
-Only return the JSON array, no other text."""
+            user_prompt = f"Document content:\n\n{pdf_content}\n\nGenerate 3 image prompts for this document."
 
-            user_prompt = f"Document content:\n\n{pdf_content}\n\nGenerate 3 image prompts for this document:"
+            # Prepare messages for the endpoint
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
 
-            # Query the LLM for image prompts
-            response = query_endpoint(
-                self.endpoint_name,
-                system_prompt,
-                user_prompt,
-                temperature=0.7,
-                max_tokens=800
+            # Query the LLM with structured JSON schema response
+            print("🧠 Requesting structured JSON response for image prompts...")
+            response = get_deploy_client('databricks').predict(
+                endpoint=self.endpoint_name,
+                inputs={
+                    "messages": messages, 
+                    "max_tokens": 800,
+                    "responseFormat": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "Image1 Prompt": {"type": "string"},
+                                    "Image2 Prompt": {"type": "string"},
+                                    "Image3 Prompt": {"type": "string"}
+                                },
+                                "required": ["Image1 Prompt", "Image2 Prompt", "Image3 Prompt"]
+                            },
+                            "strict": True
+                        }
+                    }
+                }
             )
             
+            print(f"🔍 Structured response received: {type(response)}")
+            
             if response:
-                # Extract and parse the response
-                content = self._extract_content_safely(response)
-                
-                # Try to parse as JSON
+                # Extract the structured response
                 try:
-                    import json
-                    prompts = json.loads(content.strip())
-                    
-                    # Ensure we have exactly 3 prompts
-                    if isinstance(prompts, list) and len(prompts) >= 3:
-                        return prompts[:3]  # Take first 3
+                    # Handle both direct response and wrapped response formats
+                    if isinstance(response, dict):
+                        if "choices" in response and len(response["choices"]) > 0:
+                            # OpenAI-style response format
+                            content = response["choices"][0]["message"]["content"]
+                        elif "messages" in response and len(response["messages"]) > 0:
+                            # Databricks agent format
+                            content = response["messages"][-1]["content"]
+                        else:
+                            # Direct content
+                            content = response
                     else:
-                        print(f"Warning: LLM returned {len(prompts) if isinstance(prompts, list) else 'invalid'} prompts instead of 3")
-                        # Fallback prompts
-                        return [
-                            "A professional business document illustration with clean modern design",
-                            "Office workers collaborating on important company policies and procedures", 
-                            "A corporate meeting room with presentations and documentation on display"
-                        ]
-                        
-                except json.JSONDecodeError:
-                    print(f"Warning: Could not parse LLM response as JSON: {content[:100]}...")
-                    # Fallback prompts
-                    return [
-                        "A professional business document illustration with clean modern design",
-                        "Office workers collaborating on important company policies and procedures", 
-                        "A corporate meeting room with presentations and documentation on display"
+                        content = response
+                    
+                    # Parse the structured JSON response
+                    import json
+                    if isinstance(content, str):
+                        parsed_response = json.loads(content)
+                    else:
+                        parsed_response = content
+                    
+                    print(f"✅ Parsed structured response: {parsed_response}")
+                    
+                    # Extract the three prompts using the expected keys
+                    prompts = [
+                        parsed_response.get("Image1 Prompt", ""),
+                        parsed_response.get("Image2 Prompt", ""), 
+                        parsed_response.get("Image3 Prompt", "")
                     ]
+                    
+                    # Validate all prompts are non-empty
+                    valid_prompts = [p for p in prompts if p and p.strip()]
+                    
+                    if len(valid_prompts) == 3:
+                        print(f"🎯 Successfully extracted 3 structured image prompts")
+                        return valid_prompts
+                    else:
+                        print(f"⚠️ Got {len(valid_prompts)} valid prompts instead of 3, using fallback")
+                        
+                except (json.JSONDecodeError, KeyError, TypeError) as e:
+                    print(f"⚠️ Error parsing structured JSON response: {e}")
+                    print(f"Response content: {str(response)[:200]}...")
             else:
-                print("Warning: No response from LLM for image prompt generation")
+                print("⚠️ No response from LLM for structured image prompt generation")
                 
         except Exception as e:
-            print(f"Error generating image prompts: {str(e)}")
+            print(f"❌ Error in structured image prompt generation: {str(e)}")
             
         # Fallback prompts in case of any error
+        print("🔄 Using fallback image prompts")
         return [
             "A professional business document illustration with clean modern design",
             "Office workers collaborating on important company policies and procedures", 
