@@ -1719,39 +1719,94 @@ Generate a complete customer profile with realistic data (use fictional informat
         
         pdf_path = os.path.join(local_dir, filename)
         
-        # Create PDF
-        doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+        # Create PDF with enhanced formatting (matching _create_pdf_with_images)
+        doc = SimpleDocTemplate(
+            pdf_path, 
+            pagesize=letter,
+            leftMargin=1*inch,
+            rightMargin=1*inch,
+            topMargin=1*inch,
+            bottomMargin=1*inch
+        )
         styles = getSampleStyleSheet()
         
-        # Custom styles
+        # Enhanced custom styles for professional appearance (same as with images)
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
-            fontSize=16,
-            spaceAfter=30,
-            alignment=1  # Center alignment
+            fontSize=20,
+            spaceAfter=36,
+            spaceBefore=12,
+            alignment=1,  # Center alignment
+            fontName='Helvetica-Bold',
+            textColor='#2E3440'
+        )
+        
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=styles['Heading2'],
+            fontSize=14,
+            spaceAfter=18,
+            spaceBefore=24,
+            alignment=0,  # Left alignment
+            fontName='Helvetica-Bold',
+            textColor='#3B4252'
         )
         
         body_style = ParagraphStyle(
             'CustomBody',
             parent=styles['Normal'],
-            fontSize=11,
-            spaceAfter=12,
-            alignment=0  # Left alignment
+            fontSize=12,
+            spaceAfter=14,
+            spaceBefore=2,
+            alignment=4,  # Justified alignment
+            fontName='Helvetica',
+            leftIndent=0,
+            rightIndent=0,
+            firstLineIndent=0,
+            leading=16,  # Line spacing
+            textColor='#2E3440'
+        )
+        
+        # Special style for bullet points and lists
+        list_style = ParagraphStyle(
+            'CustomList',
+            parent=body_style,
+            fontSize=12,
+            spaceAfter=8,
+            spaceBefore=4,
+            leftIndent=20,
+            bulletIndent=10,
+            leading=15
         )
         
         # Build document
         story = []
         
-        # Title
+        # Add document header with company info and date (same as with images)
+        from datetime import datetime
+        current_date = datetime.now().strftime("%B %d, %Y")
+        
+        header_info = f"Generated on {current_date}"
+        header_style = ParagraphStyle(
+            'HeaderInfo',
+            parent=styles['Normal'],
+            fontSize=9,
+            alignment=2,  # Right alignment
+            textColor='#5E81AC',
+            spaceAfter=20
+        )
+        story.append(Paragraph(header_info, header_style))
+        
+        # Title with better spacing
         title = f"{self._format_doc_type(doc_type)} Document"
         story.append(Paragraph(title, title_style))
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.3*inch))
         
-        # Sanitize content for PDF generation
+        # Sanitize content for PDF generation with enhanced formatting
         content = self._sanitize_content_for_pdf(content)
         
-        # Content - split by paragraphs and create PDF elements
+        # Content - split by paragraphs and create PDF elements with enhanced detection
         paragraphs = content.split('\n\n')
         for para in paragraphs:
             if para.strip():
@@ -1764,12 +1819,56 @@ Generate a complete customer profile with realistic data (use fictional informat
                     para_text = para_text.replace('<', '&lt;')
                     para_text = para_text.replace('>', '&gt;')
                     
-                    # Handle headers (lines that might be section titles)
-                    if len(para_text) < 100 and para_text.endswith(':'):
-                        story.append(Paragraph(para_text, styles['Heading2']))
+                    # Enhanced paragraph handling (same logic as with images)
+                    import re
+                    
+                    # Table of Contents
+                    if 'TABLE OF CONTENTS' in para_text.upper():
+                        toc_style = ParagraphStyle(
+                            'TOC_Header',
+                            parent=subtitle_style,
+                            fontSize=16,
+                            alignment=1,  # Center
+                            spaceAfter=20,
+                            spaceBefore=20
+                        )
+                        story.append(Paragraph(para_text, toc_style))
+                        story.append(Spacer(1, 0.2*inch))
+                    
+                    # Numbered sections
+                    elif re.match(r'^\d+\.\s+[A-Z]', para_text):
+                        story.append(Paragraph(para_text, subtitle_style))
+                        story.append(Spacer(1, 0.15*inch))
+                    
+                    # Document metadata
+                    elif any(keyword in para_text for keyword in ['Effective Date:', 'Document #', 'Page ', 'Revision #:']):
+                        metadata_style = ParagraphStyle(
+                            'Metadata',
+                            parent=body_style,
+                            fontSize=10,
+                            textColor='#5E81AC',
+                            alignment=1,  # Center
+                            spaceBefore=8,
+                            spaceAfter=16
+                        )
+                        story.append(Paragraph(para_text, metadata_style))
+                        story.append(Spacer(1, 0.12*inch))
+                    
+                    # Bullet points and lists
+                    elif para_text.startswith('•') or para_text.startswith('-') or para_text.startswith('*') or para_text.strip().startswith('•'):
+                        story.append(Paragraph(para_text, list_style))
+                        story.append(Spacer(1, 0.08*inch))
+                    
+                    # Section headers
+                    elif len(para_text) < 80 and (para_text.endswith(':') or para_text.isupper()):
+                        story.append(Paragraph(para_text, subtitle_style))
+                        story.append(Spacer(1, 0.15*inch))
+                    
+                    # Regular body text
                     else:
                         story.append(Paragraph(para_text, body_style))
-                    story.append(Spacer(1, 0.1*inch))
+                        story.append(Spacer(1, 0.08*inch))
+                        
                 except Exception as e:
                     # If paragraph creation fails, add as plain text
                     print(f"Warning: Could not create paragraph, adding as plain text: {str(e)}")
@@ -1777,7 +1876,7 @@ Generate a complete customer profile with realistic data (use fictional informat
                     safe_text = para.strip().replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                     try:
                         story.append(Paragraph(safe_text, body_style))
-                        story.append(Spacer(1, 0.1*inch))
+                        story.append(Spacer(1, 0.08*inch))
                     except:
                         # Last resort: skip this paragraph
                         print(f"Skipping problematic paragraph: {para[:100]}...")
@@ -2336,24 +2435,99 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
                     para_text = para_text.replace('<', '&lt;')
                     para_text = para_text.replace('>', '&gt;')
                     
-                    # Improved paragraph handling with better formatting
-                    # Detect different paragraph types for better styling
-                    if len(para_text) < 80 and (para_text.endswith(':') or para_text.isupper()):
-                        # Section headers
+                    # Enhanced paragraph handling with better formatting detection
+                    # Detect different paragraph types for appropriate styling
+                    import re
+                    
+                    # Table of Contents
+                    if 'TABLE OF CONTENTS' in para_text.upper():
+                        toc_style = ParagraphStyle(
+                            'TOC_Header',
+                            parent=subtitle_style,
+                            fontSize=16,
+                            alignment=1,  # Center
+                            spaceAfter=20,
+                            spaceBefore=20
+                        )
+                        story.append(Paragraph(para_text, toc_style))
+                    
+                    # Numbered sections (1. 2. 3. etc.)
+                    elif re.match(r'^\d+\.\s+[A-Z]', para_text):
                         story.append(Paragraph(para_text, subtitle_style))
-                    elif para_text.startswith('•') or para_text.startswith('-') or para_text.startswith('*'):
-                        # Bullet points
+                    
+                    # Subsections (3.1, 4.2, etc.)  
+                    elif re.match(r'^\s*\d+\.\d+\s+', para_text):
+                        subsection_style = ParagraphStyle(
+                            'Subsection',
+                            parent=body_style,
+                            fontSize=12,
+                            leftIndent=20,
+                            spaceBefore=8,
+                            spaceAfter=8,
+                            fontName='Helvetica-Bold'
+                        )
+                        story.append(Paragraph(para_text, subsection_style))
+                    
+                    # Horizontal rules and separators
+                    elif '─' in para_text or '―' in para_text:
+                        separator_style = ParagraphStyle(
+                            'Separator',
+                            parent=body_style,
+                            alignment=1,  # Center
+                            spaceBefore=12,
+                            spaceAfter=12
+                        )
+                        story.append(Paragraph(para_text, separator_style))
+                    
+                    # Document metadata (Effective Date, Page X of Y, etc.)
+                    elif any(keyword in para_text for keyword in ['Effective Date:', 'Document #', 'Page ', 'Revision #:']):
+                        metadata_style = ParagraphStyle(
+                            'Metadata',
+                            parent=body_style,
+                            fontSize=10,
+                            textColor='#5E81AC',
+                            alignment=1,  # Center
+                            spaceBefore=8,
+                            spaceAfter=16
+                        )
+                        story.append(Paragraph(para_text, metadata_style))
+                    
+                    # Section headers (ending with : or all caps)
+                    elif len(para_text) < 80 and (para_text.endswith(':') or para_text.isupper()):
+                        story.append(Paragraph(para_text, subtitle_style))
+                    
+                    # Bullet points and lists
+                    elif para_text.startswith('•') or para_text.startswith('-') or para_text.startswith('*') or para_text.strip().startswith('•'):
                         story.append(Paragraph(para_text, list_style))
-                    elif len(para_text) < 120 and any(word in para_text.lower() for word in ['policy', 'procedure', 'guideline', 'section', 'article']):
-                        # Policy/procedure headers
+                    
+                    # Policy/procedure headers 
+                    elif len(para_text) < 120 and any(word in para_text.lower() for word in ['policy', 'procedure', 'guideline', 'section', 'article', 'roles', 'responsibilities', 'compliance']):
                         story.append(Paragraph(para_text, subtitle_style))
+                    
+                    # Company name and document titles (likely bold text)
+                    elif len(para_text) < 100 and any(word in para_text for word in ['Inc.', 'LLC', 'Corp', 'Company', 'Solutions', 'Policy Guide', 'Human Resources']):
+                        title_emphasis_style = ParagraphStyle(
+                            'TitleEmphasis',
+                            parent=body_style,
+                            fontSize=13,
+                            fontName='Helvetica-Bold',
+                            alignment=1,  # Center
+                            spaceBefore=12,
+                            spaceAfter=12
+                        )
+                        story.append(Paragraph(para_text, title_emphasis_style))
+                    
+                    # Regular body text
                     else:
-                        # Regular body text
                         story.append(Paragraph(para_text, body_style))
                     
-                    # Conditional spacing based on paragraph type
-                    if len(para_text) < 80 and (para_text.endswith(':') or para_text.isupper()):
+                    # Smart conditional spacing based on content type
+                    if 'TABLE OF CONTENTS' in para_text.upper():
+                        story.append(Spacer(1, 0.2*inch))
+                    elif re.match(r'^\d+\.\s+[A-Z]', para_text) or len(para_text) < 80 and para_text.endswith(':'):
                         story.append(Spacer(1, 0.15*inch))  # More space after headers
+                    elif '─' in para_text or any(keyword in para_text for keyword in ['Effective Date:', 'Document #']):
+                        story.append(Spacer(1, 0.12*inch))  # Medium space for metadata
                     else:
                         story.append(Spacer(1, 0.08*inch))  # Standard spacing
                     
@@ -2583,7 +2757,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
         return type_map.get(doc_type, doc_type.replace('_', ' ').title())
 
     def _sanitize_content_for_pdf(self, content):
-        """Clean content to make it safe for PDF generation."""
+        """Enhanced content cleaning for proper PDF formatting with better line breaks and structure."""
         if not isinstance(content, str):
             content = str(content)
         
@@ -2592,7 +2766,51 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
         # Remove HTML/XML tags
         content = re.sub(r'<[^>]+>', '', content)
         
-        # Convert markdown tables to readable text
+        # Step 1: Handle bold/italic markdown formatting
+        content = re.sub(r'\*\*(.*?)\*\*', r'\1', content)  # **bold** → bold
+        content = re.sub(r'\*(.*?)\*', r'\1', content)      # *italic* → italic
+        content = re.sub(r'__(.*?)__', r'\1', content)      # __bold__ → bold  
+        content = re.sub(r'_(.*?)_', r'\1', content)        # _italic_ → italic
+        
+        # Step 2: Add proper line breaks around major sections and headers
+        # Handle document headers and separators
+        content = re.sub(r'(\*Document #.*?\*)', r'\n\n\1\n', content)
+        content = re.sub(r'(Effective Date:.*?)([A-Z])', r'\1\n\n\2', content)
+        content = re.sub(r'(Page \d+ of \d+)', r'\1\n', content)
+        content = re.sub(r'---+', '\n' + '─' * 60 + '\n', content)  # Pretty horizontal rules
+        
+        # Step 3: Improve Table of Contents formatting
+        content = re.sub(r'### Table of Contents', '\n\nTABLE OF CONTENTS\n', content)
+        content = re.sub(r'## Table of Contents', '\n\nTABLE OF CONTENTS\n', content)
+        content = re.sub(r'# Table of Contents', '\n\nTABLE OF CONTENTS\n', content)
+        
+        # Step 4: Handle numbered sections properly - add line breaks before major section numbers
+        content = re.sub(r'(\d+\.\s*\*\*[^*]+\*\*)', r'\n\n\1', content)  # 1. **Section Title**
+        content = re.sub(r'(\d+\.\s*[A-Z][^.]*[a-z])', r'\n\n\1', content)  # 1. Section Title
+        
+        # Step 5: Format subsections with proper indentation
+        content = re.sub(r'(\d+\.\d+\s+[A-Za-z])', r'\n    \1', content)  # 3.1 Subsection
+        
+        # Step 6: Handle dotted lines in table of contents
+        content = re.sub(r'\.{3,}', ' ' + '·' * 20 + ' ', content)  # Dotted leaders
+        
+        # Step 7: Add line breaks around list items and improve spacing
+        content = re.sub(r'(\d+\.\s+[A-Z][^0-9\n]*?)(\s+\d+\.)', r'\1\n\n\2', content)
+        
+        # Step 8: Handle special sections like roles, compliance, etc.
+        special_sections = [
+            r'(Roles & Responsibilities)',
+            r'(Compliance & Reporting)', 
+            r'(Special Circumstances)',
+            r'(Policy Statement)',
+            r'(Purpose and Scope)',
+            r'(Request and Approval Process)',
+            r'(Use of Vacation Time)'
+        ]
+        for pattern in special_sections:
+            content = re.sub(pattern, r'\n\n\1', content)
+        
+        # Step 9: Convert markdown tables to readable text
         lines = content.split('\n')
         cleaned_lines = []
         in_table = False
@@ -2608,9 +2826,9 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
                     if not all(cell.replace('-', '').replace(' ', '') == '' for cell in cells):
                         # Format as readable text
                         if len(cells) >= 2:
-                            cleaned_lines.append(f"{cells[0]}: {' '.join(cells[1:])}")
+                            cleaned_lines.append(f"  • {cells[0]}: {' '.join(cells[1:])}")
                         else:
-                            cleaned_lines.append(' '.join(cells))
+                            cleaned_lines.append(f"  • {' '.join(cells)}")
             else:
                 if in_table and line.strip() == '':
                     in_table = False
@@ -2620,18 +2838,27 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
         
         content = '\n'.join(cleaned_lines)
         
-        # Clean up special characters that might cause issues
+        # Step 10: Clean up special characters that might cause issues
         content = content.replace('\u2022', '•')  # Bullet points
         content = content.replace('\u2011', '-')  # Non-breaking hyphens
         content = content.replace('\u2013', '-')  # En dashes
-        content = content.replace('\u2014', '--') # Em dashes
+        content = content.replace('\u2014', '—') # Em dashes
+        content = content.replace('\u201c', '"')  # Left double quote
+        content = content.replace('\u201d', '"')  # Right double quote
+        content = content.replace('\u2018', "'")  # Left single quote
+        content = content.replace('\u2019', "'")  # Right single quote
         
-        # Remove any remaining HTML entities
+        # Step 11: Remove any remaining HTML entities
         content = re.sub(r'&[a-zA-Z0-9#]+;', '', content)
         
-        # Clean up excessive whitespace
-        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)  # Multiple blank lines
-        content = re.sub(r'[ \t]+', ' ', content)  # Multiple spaces/tabs
+        # Step 12: Clean up excessive whitespace while preserving intentional spacing
+        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)  # Multiple blank lines → double
+        content = re.sub(r'[ \t]+', ' ', content)  # Multiple spaces/tabs → single space
+        content = re.sub(r' +\n', '\n', content)  # Trailing spaces
+        
+        # Step 13: Ensure proper spacing around important elements
+        content = re.sub(r'(TABLE OF CONTENTS)', r'\n\1\n', content)
+        content = re.sub(r'([.!?])\s*([A-Z][a-z])', r'\1\n\n\2', content)  # Sentence breaks
         
         return content.strip()
 
