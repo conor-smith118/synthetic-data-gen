@@ -1858,55 +1858,80 @@ Only return the JSON array, no other text."""
         ]
     
     def _generate_images(self, image_prompts):
-        """Generate images from prompts using the serving-endpoint-image endpoint."""
+        """Generate images from prompts using the Databricks image generation endpoint."""
         generated_images = []
         
-        for i, prompt in enumerate(image_prompts):
-            try:
-                print(f"🎨 Generating image {i+1}/3: {prompt[:50]}...")
-                
-                # Query the image generation endpoint
-                messages = [
-                    {"role": "user", "content": prompt}
-                ]
-                response = query_endpoint("serving-endpoint-image", messages, 1024)
-                
-                if response and hasattr(response, 'data') and len(response.data) > 0:
-                    # Extract image from response.data[0].image[0]
-                    image_data = response.data[0].image[0]
+        try:
+            # Import OpenAI client
+            from openai import OpenAI
+            
+            # Get Databricks token from environment
+            databricks_token = os.environ.get('DATABRICKS_TOKEN')
+            databricks_host = os.environ.get('DATABRICKS_HOST', 'https://e2-demo-field-eng.cloud.databricks.com')
+            
+            if not databricks_token:
+                print("❌ DATABRICKS_TOKEN environment variable not set for image generation")
+                return []
+            
+            # Initialize OpenAI client for Databricks
+            client = OpenAI(
+                api_key=databricks_token,
+                base_url=f"{databricks_host}/serving-endpoints"
+            )
+            
+            for i, prompt in enumerate(image_prompts):
+                try:
+                    print(f"🎨 Generating image {i+1}/3: {prompt[:50]}...")
                     
-                    # Save image to local file
-                    local_dir = "./generated_documents/images"
-                    os.makedirs(local_dir, exist_ok=True)
+                    # Generate image using OpenAI client pattern
+                    response = client.images.generate(
+                        model="serving-endpoint-image",
+                        prompt=prompt
+                    )
                     
-                    image_filename = f"image_{int(time.time())}_{i+1}.png"
-                    image_path = os.path.join(local_dir, image_filename)
-                    
-                    # Save the image data (assuming it's base64 or binary)
-                    if isinstance(image_data, str):
-                        # Base64 encoded
-                        import base64
-                        with open(image_path, 'wb') as f:
-                            f.write(base64.b64decode(image_data))
+                    if response and response.data and len(response.data) > 0:
+                        # Extract image from response.data[0].image[0]
+                        image_data = response.data[0].image[0]
+                        
+                        # Save image to local file
+                        local_dir = "./generated_documents/images"
+                        os.makedirs(local_dir, exist_ok=True)
+                        
+                        image_filename = f"image_{int(time.time())}_{i+1}.png"
+                        image_path = os.path.join(local_dir, image_filename)
+                        
+                        # Save the image data (assuming it's base64 encoded)
+                        if isinstance(image_data, str):
+                            # Base64 encoded
+                            import base64
+                            with open(image_path, 'wb') as f:
+                                f.write(base64.b64decode(image_data))
+                        else:
+                            # Binary data
+                            with open(image_path, 'wb') as f:
+                                f.write(image_data)
+                        
+                        generated_images.append({
+                            'prompt': prompt,
+                            'path': image_path,
+                            'filename': image_filename
+                        })
+                        
+                        print(f"✅ Image {i+1} saved to {image_path}")
+                        
                     else:
-                        # Binary data
-                        with open(image_path, 'wb') as f:
-                            f.write(image_data)
+                        print(f"❌ No image data received for prompt {i+1}")
+                        
+                except Exception as e:
+                    print(f"❌ Error generating image {i+1}: {str(e)}")
+                    continue
                     
-                    generated_images.append({
-                        'prompt': prompt,
-                        'path': image_path,
-                        'filename': image_filename
-                    })
-                    
-                    print(f"✅ Image {i+1} saved to {image_path}")
-                    
-                else:
-                    print(f"❌ No image data received for prompt {i+1}")
-                    
-            except Exception as e:
-                print(f"❌ Error generating image {i+1}: {str(e)}")
-                continue
+        except ImportError:
+            print("❌ OpenAI library not available for image generation")
+            return []
+        except Exception as e:
+            print(f"❌ Error setting up image generation client: {str(e)}")
+            return []
                 
         return generated_images
     
