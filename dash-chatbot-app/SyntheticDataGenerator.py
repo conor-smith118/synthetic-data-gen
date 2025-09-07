@@ -1814,7 +1814,7 @@ You must respond with a JSON object containing exactly three image prompts."""
             # Query the LLM with structured JSON schema response using serving-endpoint-3
             print("🧠 Requesting structured JSON response for image prompts from serving-endpoint-3...")
             response = get_deploy_client('databricks').predict(
-                endpoint="serving-endpoint-3",
+                endpoint="databricks-meta-llama-3-3-70b-instruct",
                 inputs={
                     "messages": messages, 
                     "max_tokens": 800,
