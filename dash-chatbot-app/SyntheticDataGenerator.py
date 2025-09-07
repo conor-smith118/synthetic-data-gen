@@ -1866,13 +1866,10 @@ Only return the JSON array, no other text."""
                 print(f"🎨 Generating image {i+1}/3: {prompt[:50]}...")
                 
                 # Query the image generation endpoint
-                response = query_endpoint(
-                    "serving-endpoint-image",  # Specific image endpoint
-                    "",  # No system prompt for image generation
-                    prompt,
-                    temperature=0.7,
-                    max_tokens=1024
-                )
+                messages = [
+                    {"role": "user", "content": prompt}
+                ]
+                response = query_endpoint("serving-endpoint-image", messages, 1024)
                 
                 if response and hasattr(response, 'data') and len(response.data) > 0:
                     # Extract image from response.data[0].image[0]
