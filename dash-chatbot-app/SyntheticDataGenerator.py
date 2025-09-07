@@ -2335,7 +2335,16 @@ Please incorporate this company information naturally throughout the document to
                         .appName("SyntheticDataGenerator") \
                         .config("spark.sql.shuffle.partitions", "8") \
                         .getOrCreate()
-            except ImportError:
+                
+                print("🚀 TABULAR GENERATION: Using Spark implementation (dbldatagen + ai_query)")
+                print(f"   - Row count: {row_count}")
+                print(f"   - GenAI Text columns will generate UNIQUE content for ALL rows")
+                
+            except ImportError as e:
+                print(f"⚠️  TABULAR GENERATION: PySpark not available ({e})")
+                print("🔄 FALLBACK: Using Pandas implementation")
+                print(f"   - Row count: {row_count}")
+                print("   - GenAI Text limited to first 10 rows, then repeats")
                 # If PySpark is not available, create a simple CSV as fallback
                 return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
             
@@ -2389,6 +2398,10 @@ Please incorporate this company information naturally throughout the document to
             df = data_gen.build()
             
             # Process GenAI Text columns with ai_query
+            genai_columns = [col for col in columns if col.get('data_type') == 'GenAI Text']
+            if genai_columns:
+                print(f"🤖 SPARK AI_QUERY: Processing {len(genai_columns)} GenAI Text column(s)")
+                
             for col in columns:
                 col_name = col.get('name', 'unnamed_column')
                 col_type = col.get('data_type', 'Integer')
@@ -2396,6 +2409,7 @@ Please incorporate this company information naturally throughout the document to
                 if col_type == 'GenAI Text':
                     prompt_template = col.get('prompt', '')
                     if prompt_template:
+                        print(f"   - Column '{col_name}': Will generate unique AI text for ALL {row_count} rows")
                         self.generation_state['current_step'] = f"Generating AI text for column '{col_name}'..."
                         
                         # Add table formatting note to the prompt
@@ -2463,6 +2477,10 @@ Please incorporate this company information naturally throughout the document to
 
     def _generate_tabular_fallback(self, table_name, row_count, columns, company_name, company_sector, timestamp):
         """Fallback method to generate tabular data without Spark."""
+        print("🔄 PANDAS FALLBACK: Starting fallback tabular generation")
+        print(f"   - Row count: {row_count}")
+        print(f"   - GenAI Text will be limited to first 10 rows, then duplicated")
+        
         try:
             import pandas as pd
             import random
@@ -2532,6 +2550,11 @@ Please incorporate this company information naturally throughout the document to
             # Process GenAI Text columns by calling the LLM endpoint
             from model_serving_utils import query_endpoint
             
+            genai_columns = [col for col in columns if col.get('data_type') == 'GenAI Text']
+            if genai_columns:
+                print(f"🤖 PANDAS FALLBACK AI: Processing {len(genai_columns)} GenAI Text column(s)")
+                print(f"   ⚠️  LIMITED: Will only generate unique content for first 10 rows")
+            
             for col in columns:
                 col_name = col.get('name', 'unnamed_column')
                 col_type = col.get('data_type', 'Integer')
@@ -2539,11 +2562,12 @@ Please incorporate this company information naturally throughout the document to
                 if col_type == 'GenAI Text':
                     prompt_template = col.get('prompt', '')
                     if prompt_template:
+                        batch_size = min(10, row_count)  # Limit API calls for fallback
+                        print(f"   - Column '{col_name}': Generating {batch_size} unique texts, duplicating remainder")
                         self.generation_state['current_step'] = f"Generating AI text for column '{col_name}'..."
                         
                         # Generate text for each row (for fallback, we'll limit to reasonable amounts)
                         ai_texts = []
-                        batch_size = min(10, row_count)  # Limit API calls for fallback
                         
                         for i in range(min(batch_size, row_count)):
                             try:
