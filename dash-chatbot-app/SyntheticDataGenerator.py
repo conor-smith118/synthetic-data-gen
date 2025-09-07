@@ -1789,11 +1789,11 @@ Generate a complete customer profile with realistic data (use fictional informat
         return pdf_path
     
     def _generate_image_prompts(self, pdf_content):
-        """Generate 3 contextual image prompts based on PDF content using structured JSON response."""
+        """Generate 3 contextual image prompts based on PDF content using robust parsing."""
         try:
             from mlflow.deployments import get_deploy_client
             
-            # Create a prompt to generate image prompts with structured JSON response
+            # Create a prompt to generate image prompts with clear formatting
             system_prompt = """Based on the provided document content, generate exactly 3 descriptive image prompts that would enhance the document when included as illustrations. Each prompt should:
 
 1. Be clear and specific for image generation
@@ -1801,7 +1801,14 @@ Generate a complete customer profile with realistic data (use fictional informat
 3. Be appropriate for a professional document
 4. Be realistic and achievable by an image generator
 
-You must respond with a JSON object containing exactly three image prompts."""
+Format your response in one of these ways:
+- As a JSON array: ["prompt1", "prompt2", "prompt3"]
+- As numbered lines:
+1. prompt1
+2. prompt2  
+3. prompt3
+
+Provide exactly 3 prompts, each on its own line or in a clear format."""
 
             user_prompt = f"Document content:\n\n{pdf_content}\n\nGenerate 3 image prompts for this document."
 
@@ -1811,35 +1818,20 @@ You must respond with a JSON object containing exactly three image prompts."""
                 {"role": "user", "content": user_prompt}
             ]
 
-            # Query the LLM with structured JSON schema response using serving-endpoint-3
-            print("🧠 Requesting structured JSON response for image prompts from serving-endpoint-3...")
+            # Query the LLM for image prompts - no responseFormat needed
+            print("🧠 Requesting image prompts from databricks-meta-llama-3-3-70b-instruct...")
             response = get_deploy_client('databricks').predict(
                 endpoint="databricks-meta-llama-3-3-70b-instruct",
                 inputs={
                     "messages": messages, 
-                    "max_tokens": 800,
-                    "responseFormat": {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "Image1 Prompt": {"type": "string"},
-                                    "Image2 Prompt": {"type": "string"},
-                                    "Image3 Prompt": {"type": "string"}
-                                },
-                                "required": ["Image1 Prompt", "Image2 Prompt", "Image3 Prompt"]
-                            },
-                            "strict": True
-                        }
-                    }
+                    "max_tokens": 800
                 }
             )
             
-            print(f"🔍 Structured response received: {type(response)}")
+            print(f"🔍 Response received: {type(response)}")
             
             if response:
-                # Extract the structured response
+                # Extract content from response
                 try:
                     # Handle both direct response and wrapped response formats
                     if isinstance(response, dict):
@@ -1851,46 +1843,32 @@ You must respond with a JSON object containing exactly three image prompts."""
                             content = response["messages"][-1]["content"]
                         else:
                             # Direct content
-                            content = response
+                            content = str(response)
                     else:
-                        content = response
+                        content = str(response)
                     
-                    # Parse the structured JSON response
-                    import json
-                    if isinstance(content, str):
-                        parsed_response = json.loads(content)
+                    print(f"📝 Extracted content for parsing...")
+                    
+                    # Use robust parsing to extract image prompts
+                    parsed_prompts = self._extract_image_prompts_robustly(content)
+                    
+                    if parsed_prompts and len(parsed_prompts) == 3:
+                        print(f"🎯 Successfully extracted 3 image prompts using robust parsing")
+                        return parsed_prompts
                     else:
-                        parsed_response = content
-                    
-                    print(f"✅ Parsed structured response: {parsed_response}")
-                    
-                    # Extract the three prompts using the expected keys
-                    prompts = [
-                        parsed_response.get("Image1 Prompt", ""),
-                        parsed_response.get("Image2 Prompt", ""), 
-                        parsed_response.get("Image3 Prompt", "")
-                    ]
-                    
-                    # Validate all prompts are non-empty
-                    valid_prompts = [p for p in prompts if p and p.strip()]
-                    
-                    if len(valid_prompts) == 3:
-                        print(f"🎯 Successfully extracted 3 structured image prompts")
-                        return valid_prompts
-                    else:
-                        print(f"⚠️ Got {len(valid_prompts)} valid prompts instead of 3, using fallback")
+                        print(f"⚠️ Robust parsing returned {len(parsed_prompts) if parsed_prompts else 0} prompts")
                         
-                except (json.JSONDecodeError, KeyError, TypeError) as e:
-                    print(f"⚠️ Error parsing structured JSON response: {e}")
+                except Exception as e:
+                    print(f"⚠️ Error processing LLM response: {e}")
                     print(f"Response content: {str(response)[:200]}...")
             else:
-                print("⚠️ No response from LLM for structured image prompt generation")
+                print("⚠️ No response from LLM for image prompt generation")
                 
         except Exception as e:
-            print(f"❌ Error in structured image prompt generation: {str(e)}")
+            print(f"❌ Error in image prompt generation: {str(e)}")
             
         # Fallback prompts in case of any error
-        print("🔄 Using fallback image prompts")
+        print("🔄 All parsing strategies failed, using fallback image prompts")
         return [
             "A professional business document illustration with clean modern design",
             "Office workers collaborating on important company policies and procedures", 
@@ -2090,6 +2068,98 @@ You must respond with a JSON object containing exactly three image prompts."""
             return []
                 
         return generated_images
+    
+    def _extract_image_prompts_robustly(self, content):
+        """Robustly extract 3 image prompts from LLM response regardless of format."""
+        try:
+            import json
+            import re
+            
+            print(f"🔍 Raw content to parse: {content[:200]}...")
+            
+            # Strategy 1: Try to parse as JSON array
+            try:
+                # Look for JSON array pattern
+                json_match = re.search(r'\[.*?\]', content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    prompts = json.loads(json_str)
+                    if isinstance(prompts, list) and len(prompts) >= 3:
+                        print("✅ Successfully parsed JSON array format")
+                        return [str(p).strip() for p in prompts[:3]]
+            except:
+                pass
+            
+            # Strategy 2: Try to parse as JSON object
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict):
+                    # Look for various possible keys
+                    possible_keys = [
+                        ["Image1 Prompt", "Image2 Prompt", "Image3 Prompt"],
+                        ["prompt1", "prompt2", "prompt3"],
+                        ["1", "2", "3"],
+                        ["image1", "image2", "image3"]
+                    ]
+                    
+                    for key_set in possible_keys:
+                        if all(key in parsed for key in key_set):
+                            prompts = [parsed[key] for key in key_set]
+                            if all(prompts):
+                                print(f"✅ Successfully parsed JSON object with keys {key_set}")
+                                return [str(p).strip() for p in prompts]
+                
+                # If it's a list directly
+                elif isinstance(parsed, list) and len(parsed) >= 3:
+                    print("✅ Successfully parsed direct JSON list")
+                    return [str(p).strip() for p in parsed[:3]]
+            except:
+                pass
+            
+            # Strategy 3: Parse numbered lines (1. 2. 3. or 1) 2) 3))
+            numbered_pattern = r'(?:^|\n)\s*(?:[1-3][\.\)])\s*(.+?)(?=(?:\n\s*[1-3][\.\)])|$)'
+            numbered_matches = re.findall(numbered_pattern, content, re.MULTILINE | re.DOTALL)
+            if len(numbered_matches) >= 3:
+                prompts = [match.strip().replace('\n', ' ') for match in numbered_matches[:3]]
+                if all(len(p) > 10 for p in prompts):  # Basic quality check
+                    print("✅ Successfully parsed numbered list format")
+                    return prompts
+            
+            # Strategy 4: Parse bullet points (- or • or *)
+            bullet_pattern = r'(?:^|\n)\s*[-•*]\s*(.+?)(?=(?:\n\s*[-•*])|$)'
+            bullet_matches = re.findall(bullet_pattern, content, re.MULTILINE | re.DOTALL)
+            if len(bullet_matches) >= 3:
+                prompts = [match.strip().replace('\n', ' ') for match in bullet_matches[:3]]
+                if all(len(p) > 10 for p in prompts):  # Basic quality check
+                    print("✅ Successfully parsed bullet point format")
+                    return prompts
+            
+            # Strategy 5: Split by common delimiters and take first 3 substantial lines
+            lines = []
+            for delimiter in ['\n\n', '\n', '. ', '; ']:
+                potential_lines = [line.strip() for line in content.split(delimiter)]
+                substantial_lines = [line for line in potential_lines if len(line) > 20 and not line.lower().startswith(('based on', 'here are', 'the document', 'generate', 'create'))]
+                if len(substantial_lines) >= 3:
+                    lines = substantial_lines
+                    break
+            
+            if len(lines) >= 3:
+                print("✅ Successfully parsed by splitting and filtering lines")
+                return lines[:3]
+            
+            # Strategy 6: Extract quoted strings
+            quote_pattern = r'"([^"]{20,})"'
+            quoted_matches = re.findall(quote_pattern, content)
+            if len(quoted_matches) >= 3:
+                print("✅ Successfully extracted quoted strings")
+                return quoted_matches[:3]
+            
+            print("⚠️ Could not parse prompts from LLM response using any strategy")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error in robust parsing: {e}")
+            return None
     
     def _create_intelligent_caption(self, image_prompt, figure_number):
         """Create an intelligent caption based on the image prompt."""
