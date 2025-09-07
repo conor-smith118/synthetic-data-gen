@@ -1811,10 +1811,10 @@ You must respond with a JSON object containing exactly three image prompts."""
                 {"role": "user", "content": user_prompt}
             ]
 
-            # Query the LLM with structured JSON schema response
-            print("🧠 Requesting structured JSON response for image prompts...")
+            # Query the LLM with structured JSON schema response using serving-endpoint-3
+            print("🧠 Requesting structured JSON response for image prompts from serving-endpoint-3...")
             response = get_deploy_client('databricks').predict(
-                endpoint=self.endpoint_name,
+                endpoint="serving-endpoint-3",
                 inputs={
                     "messages": messages, 
                     "max_tokens": 800,
