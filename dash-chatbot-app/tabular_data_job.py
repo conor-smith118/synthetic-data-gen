@@ -277,14 +277,41 @@ def main():
         
         print("💾 DATABRICKS JOB: Saving to volume...")
         
-        # Save to Databricks volume
+        # Save to Databricks volume using a more compatible approach
         filename = f"{table_name}_{timestamp}.csv"
-        volume_file_path = f"/Volumes/{volume_path}/{filename}"
         
-        # Write DataFrame to volume as CSV
-        df.coalesce(1).write.mode("overwrite").option("header", "true").csv(volume_file_path)
+        # First convert to Pandas for easier file handling
+        print("📊 DATABRICKS JOB: Converting DataFrame to Pandas for volume write...")
+        pandas_df = df.toPandas()
         
-        print(f"✅ DATABRICKS JOB: Successfully saved to {volume_file_path}")
+        # Write to local temporary location first
+        temp_path = f"/tmp/{filename}"
+        pandas_df.to_csv(temp_path, index=False)
+        print(f"✅ DATABRICKS JOB: Temporary file created at {temp_path}")
+        
+        # Use dbutils to copy to volume (more reliable for UC volumes)
+        try:
+            volume_file_path = f"/Volumes/{volume_path}/{filename}"
+            
+            # Create volume directory if it doesn't exist
+            volume_dir = f"/Volumes/{volume_path}"
+            print(f"📁 DATABRICKS JOB: Ensuring volume directory exists: {volume_dir}")
+            
+            # Copy file to volume using dbutils
+            print(f"📤 DATABRICKS JOB: Copying file to volume: {volume_file_path}")
+            dbutils.fs.cp(f"file://{temp_path}", volume_file_path)
+            
+            print(f"✅ DATABRICKS JOB: Successfully saved to {volume_file_path}")
+            
+            # Clean up temporary file
+            dbutils.fs.rm(f"file://{temp_path}")
+            print(f"🧹 DATABRICKS JOB: Cleaned up temporary file")
+            
+        except Exception as volume_error:
+            print(f"⚠️  DATABRICKS JOB: Error writing to volume ({volume_error})")
+            print(f"📁 DATABRICKS JOB: File available at temporary location: {temp_path}")
+            # Keep the temp file as fallback
+            volume_file_path = temp_path
         
         # Get some statistics for logging
         total_rows = df.count()
