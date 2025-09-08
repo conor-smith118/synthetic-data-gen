@@ -188,10 +188,28 @@ def main():
                 data_gen = data_gen.withColumn(col_name, "integer", minValue=min_val, maxValue=max_val)
                 
             elif col_type == 'First Name':
-                data_gen = data_gen.withColumn(col_name, text=fakerText("first_name"))
+                # Try faker first, fall back to predefined lists if faker not available
+                try:
+                    data_gen = data_gen.withColumn(col_name, text=fakerText("first_name"))
+                except Exception as e:
+                    print(f"⚠️  Faker not available for first names ({e}), using predefined list")
+                    first_names = ["James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda", 
+                                  "William", "Elizabeth", "David", "Barbara", "Richard", "Susan", "Joseph", "Jessica",
+                                  "Thomas", "Sarah", "Christopher", "Karen", "Charles", "Helen", "Daniel", "Nancy",
+                                  "Matthew", "Betty", "Anthony", "Dorothy", "Mark", "Lisa", "Donald", "Sandra"]
+                    data_gen = data_gen.withColumn(col_name, values=first_names)
                 
             elif col_type == 'Last Name':
-                data_gen = data_gen.withColumn(col_name, text=fakerText("last_name"))
+                # Try faker first, fall back to predefined lists if faker not available  
+                try:
+                    data_gen = data_gen.withColumn(col_name, text=fakerText("last_name"))
+                except Exception as e:
+                    print(f"⚠️  Faker not available for last names ({e}), using predefined list")
+                    last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis",
+                                 "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas",
+                                 "Taylor", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson", "White", "Harris",
+                                 "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen"]
+                    data_gen = data_gen.withColumn(col_name, values=last_names)
                 
             elif col_type == 'GenAI Text':
                 # For GenAI Text, add placeholder column first, then process with ai_query
@@ -247,14 +265,11 @@ def main():
                     print(f"   - Using prompt expression: {prompt_expression}")
                     
                     # Use ai_query to generate text based on the dynamic prompt
+                    # Note: ai_query signature is ai_query(endpoint => string, request => string)
                     df = df.withColumn(
                         col_name,
                         expr(
-                            "ai_query("
-                            f"'{endpoint_name}', "
-                            f"request => {prompt_expression}, "
-                            f"params => map('temperature', 0.9, 'top_p', 0.95, 'max_tokens', {max_tokens})"
-                            ")"
+                            f"ai_query(endpoint => '{endpoint_name}', request => {prompt_expression})"
                         )
                     )
                     
