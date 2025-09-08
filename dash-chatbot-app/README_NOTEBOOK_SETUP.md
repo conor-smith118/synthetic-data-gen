@@ -41,7 +41,7 @@ I've successfully converted the Python script to a Databricks notebook (`tabular
    company_sector: Technology
    timestamp: 20250908_000000
    endpoint_name: databricks-gpt-oss-120b
-   volume_path: conor_smith.synthetic_data_app.synthetic_data_volume
+   volume_path: conor_smith/synthetic_data_app/synthetic_data_volume
    ```
 
 #### **Step 3: Test the Setup**

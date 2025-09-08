@@ -3236,7 +3236,7 @@ Please incorporate this company information naturally throughout the document to
                 "company_sector": company_sector,
                 "timestamp": timestamp,
                 "endpoint_name": self.endpoint_name,
-                "volume_path": "conor_smith.synthetic_data_app.synthetic_data_volume"
+                "volume_path": "conor_smith/synthetic_data_app/synthetic_data_volume"
             }
             
             self.generation_state['current_step'] = f"Submitting job to Databricks cluster..."
