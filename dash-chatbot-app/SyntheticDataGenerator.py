@@ -3240,31 +3240,61 @@ Please incorporate this company information naturally throughout the document to
             }
 
     def _generate_tabular_item(self, table_name, row_count, columns, company_name, company_sector, timestamp):
-        """Generate tabular data using dbldatagen."""
+        """Generate tabular data using dbldatagen with remote Databricks cluster via Databricks Connect."""
         try:
             self.generation_state['current_step'] = f"Generating {row_count} rows of tabular data..."
             
-            # Get or create Spark session - try to get existing session first
+            # Connect to remote Databricks cluster using Databricks Connect
             try:
-                from pyspark.sql import SparkSession
-                spark = SparkSession.getActiveSession()
-                if spark is None:
-                    # Create a new Spark session if none exists
-                    spark = SparkSession.builder \
-                        .appName("SyntheticDataGenerator") \
-                        .config("spark.sql.shuffle.partitions", "8") \
-                        .getOrCreate()
+                import os
+                from databricks.connect import DatabricksSession
                 
-                print("🚀 TABULAR GENERATION: Using Spark implementation (dbldatagen + ai_query)")
+                # Get cluster_id from environment or config
+                cluster_id = os.getenv("DATABRICKS_CLUSTER_ID")
+                if not cluster_id:
+                    # Try to read from config.py file
+                    try:
+                        import sys
+                        import os.path
+                        
+                        # Add current directory to path to import config
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        if current_dir not in sys.path:
+                            sys.path.append(current_dir)
+                        
+                        import config
+                        cluster_id = getattr(config, 'DATABRICKS_CLUSTER_ID', None)
+                    except:
+                        cluster_id = "0906-022525-wcmwthm0"  # Fallback to provided cluster_id
+                
+                if not cluster_id:
+                    raise ValueError("DATABRICKS_CLUSTER_ID not found in environment or config")
+                
+                print("🔌 TABULAR GENERATION: Connecting to Databricks cluster...")
+                print(f"   - Cluster ID: {cluster_id}")
+                print(f"   - Host: {os.getenv('DATABRICKS_HOST', 'Not set')}")
+                
+                # Create remote Databricks session
+                spark = DatabricksSession.builder.remote(
+                    host=os.getenv("DATABRICKS_HOST"),
+                    cluster_id=cluster_id
+                ).getOrCreate()
+                
+                print("🚀 TABULAR GENERATION: Connected to remote Databricks cluster (dbldatagen + ai_query)")
                 print(f"   - Row count: {row_count}")
                 print(f"   - GenAI Text columns will generate UNIQUE content for ALL rows")
                 
             except ImportError as e:
-                print(f"⚠️  TABULAR GENERATION: PySpark not available ({e})")
+                print(f"⚠️  TABULAR GENERATION: Databricks Connect not available ({e})")
                 print("🔄 FALLBACK: Using Pandas implementation")
                 print(f"   - Row count: {row_count}")
                 print("   - GenAI Text will generate unique content for ALL rows")
-                # If PySpark is not available, create a simple CSV as fallback
+                return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
+            except Exception as e:
+                print(f"⚠️  TABULAR GENERATION: Failed to connect to Databricks cluster ({e})")
+                print("🔄 FALLBACK: Using Pandas implementation")
+                print(f"   - Row count: {row_count}")
+                print("   - GenAI Text will generate unique content for ALL rows")
                 return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
             
             # Set partition parameters
@@ -3390,7 +3420,7 @@ Please incorporate this company information naturally throughout the document to
             }
             
         except Exception as e:
-            print(f"⚠️  TABULAR GENERATION: Spark failed ({str(e)})")
+            print(f"⚠️  TABULAR GENERATION: Remote Databricks cluster operation failed ({str(e)})")
             print("🔄 FALLBACK: Using Pandas implementation")
             print(f"   - Row count: {row_count}")
             print("   - GenAI Text will generate unique content for ALL rows")

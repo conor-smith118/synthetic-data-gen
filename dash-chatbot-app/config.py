@@ -3,3 +3,4 @@
 
 DATABRICKS_API_KEY = "dapia2b1550a46005ec59e73adc0f9ff0836"
 DATABRICKS_HOST = "https://e2-demo-field-eng.cloud.databricks.com"
+DATABRICKS_CLUSTER_ID = "0906-022525-wcmwthm0"
