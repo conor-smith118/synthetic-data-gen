@@ -1978,13 +1978,10 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
                 else:
                     print("❌ No API key found in secrets or DATABRICKS_TOKEN environment variable")
                     return []
-            
-            # Get base URL from config or environment
-            base_url = f"{os.environ.get('DATABRICKS_HOST', 'https://e2-demo-field-eng.cloud.databricks.com')}/serving-endpoints"
 
             client = OpenAI(
                 api_key=api_key,
-                base_url=base_url
+                base_url="https://e2-demo-field-eng.cloud.databricks.com/serving-endpoints"
             )
 
             
