@@ -29,21 +29,80 @@ def main():
     
     # Get parameters from Databricks job
     try:
-        # Parameters are passed as environment variables or job parameters
-        table_name = dbutils.widgets.get("table_name") if 'dbutils' in globals() else os.environ.get("table_name", "sample_table")
-        row_count = int(dbutils.widgets.get("row_count") if 'dbutils' in globals() else os.environ.get("row_count", "1000"))
-        columns_json = dbutils.widgets.get("columns") if 'dbutils' in globals() else os.environ.get("columns", "[]")
-        company_name = dbutils.widgets.get("company_name") if 'dbutils' in globals() else os.environ.get("company_name", "Sample Company")
-        company_sector = dbutils.widgets.get("company_sector") if 'dbutils' in globals() else os.environ.get("company_sector", "Technology")
-        timestamp = dbutils.widgets.get("timestamp") if 'dbutils' in globals() else os.environ.get("timestamp", datetime.now().strftime("%Y%m%d_%H%M%S"))
-        endpoint_name = dbutils.widgets.get("endpoint_name") if 'dbutils' in globals() else os.environ.get("endpoint_name", "databricks-gpt-oss-120b")
-        volume_path = dbutils.widgets.get("volume_path") if 'dbutils' in globals() else os.environ.get("volume_path", "conor_smith.synthetic_data_app.synthetic_data_volume")
+        # For jobs triggered via jobs.run_now(), parameters are accessed via sys.argv or task context
+        # Try to get from task context first, then fall back to environment variables
+        
+        # Debug: Print command line arguments
+        print(f"🔍 DATABRICKS JOB: Command line arguments: {sys.argv}")
+        
+        def get_job_parameter(param_name, default_value):
+            """Get parameter from various Databricks job parameter sources."""
+            try:
+                # Method 1: Try dbutils.notebook.getArgument (for notebook-based jobs)
+                if 'dbutils' in globals():
+                    try:
+                        value = dbutils.notebook.getArgument(param_name, default_value)
+                        if value != default_value:
+                            print(f"✅ Found {param_name} via dbutils.notebook.getArgument: {value}")
+                            return value
+                    except Exception as e:
+                        print(f"⚠️  dbutils.notebook.getArgument failed for {param_name}: {e}")
+                
+                # Method 2: Try environment variables (job parameters often set as env vars)
+                env_value = os.environ.get(param_name)
+                if env_value is not None:
+                    print(f"✅ Found {param_name} via environment variable: {env_value}")
+                    return env_value
+                
+                # Method 3: Try with uppercase (sometimes parameters are uppercased)
+                env_value = os.environ.get(param_name.upper())
+                if env_value is not None:
+                    print(f"✅ Found {param_name} via uppercase environment variable: {env_value}")
+                    return env_value
+                
+                # Method 4: Try command line arguments (for script-based jobs)
+                for i, arg in enumerate(sys.argv):
+                    if f"--{param_name}" in arg:
+                        if "=" in arg:
+                            value = arg.split("=", 1)[1]
+                            print(f"✅ Found {param_name} via command line argument: {value}")
+                            return value
+                        elif i + 1 < len(sys.argv):
+                            value = sys.argv[i + 1]
+                            print(f"✅ Found {param_name} via command line argument: {value}")
+                            return value
+                
+                # Return default if nothing found
+                print(f"⚠️  Using default value for {param_name}: {default_value}")
+                return default_value
+            except Exception as e:
+                print(f"❌ Error getting parameter {param_name}: {e}")
+                return default_value
+        
+        # Get parameters using the robust parameter access method
+        table_name = get_job_parameter("table_name", "sample_table")
+        row_count = int(get_job_parameter("row_count", "1000"))
+        columns_json = get_job_parameter("columns", "[]")
+        company_name = get_job_parameter("company_name", "Sample Company")
+        company_sector = get_job_parameter("company_sector", "Technology")
+        timestamp = get_job_parameter("timestamp", datetime.now().strftime("%Y%m%d_%H%M%S"))
+        endpoint_name = get_job_parameter("endpoint_name", "databricks-gpt-oss-120b")
+        volume_path = get_job_parameter("volume_path", "conor_smith.synthetic_data_app.synthetic_data_volume")
         
         print("🚀 DATABRICKS JOB: Starting tabular data generation")
+        
+        # Debug: Print all available environment variables (filtered for our parameters)
+        print("🔍 DATABRICKS JOB: Available environment variables:")
+        relevant_env_vars = {k: v for k, v in os.environ.items() if any(param in k.lower() for param in ['table_name', 'row_count', 'columns', 'company', 'timestamp', 'endpoint', 'volume'])}
+        for key, value in relevant_env_vars.items():
+            print(f"   - {key}: {value[:100]}..." if len(str(value)) > 100 else f"   - {key}: {value}")
+        
+        print("📋 DATABRICKS JOB: Resolved parameters:")
         print(f"   - Table name: {table_name}")
         print(f"   - Row count: {row_count}")
         print(f"   - Company: {company_name} ({company_sector})")
         print(f"   - Timestamp: {timestamp}")
+        print(f"   - Endpoint: {endpoint_name}")
         print(f"   - Volume: {volume_path}")
         
         # Parse column configurations

@@ -3251,8 +3251,24 @@ Please incorporate this company information naturally throughout the document to
                     else:
                         print(f"   - {key}: {value}")
                 
-                run = w.jobs.run_now(job_id=job_id, job_parameters=job_parameters)
-                print(f"✅ DATABRICKS JOB: Started run with ID {run.run_id}")
+                # Try to run the job with parameters
+                print(f"📤 DATABRICKS JOB: Attempting to start job with parameters...")
+                
+                try:
+                    run = w.jobs.run_now(job_id=job_id, job_parameters=job_parameters)
+                    print(f"✅ DATABRICKS JOB: Started run with ID {run.run_id}")
+                except Exception as job_start_error:
+                    print(f"⚠️  DATABRICKS JOB: Error starting job with parameters: {job_start_error}")
+                    print("🔄 DATABRICKS JOB: Attempting to start job without parameters as fallback...")
+                    
+                    # Try without parameters as fallback
+                    try:
+                        run = w.jobs.run_now(job_id=job_id)
+                        print(f"✅ DATABRICKS JOB: Started run without parameters, ID: {run.run_id}")
+                        print("⚠️  Note: Job may use default parameters")
+                    except Exception as fallback_error:
+                        print(f"❌ DATABRICKS JOB: Failed to start job even without parameters: {fallback_error}")
+                        raise fallback_error
                 
                 self.generation_state['current_step'] = f"Job running on Databricks cluster (Run ID: {run.run_id})..."
                 
