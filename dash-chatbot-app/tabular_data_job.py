@@ -35,9 +35,36 @@ def main():
         # Debug: Print command line arguments
         print(f"🔍 DATABRICKS JOB: Command line arguments: {sys.argv}")
         
+        # Debug: Check if dbutils is available and what methods it has
+        print("🔍 DATABRICKS JOB: Checking dbutils availability...")
+        if 'dbutils' in globals():
+            print("✅ dbutils is available")
+            print(f"   - dbutils type: {type(dbutils)}")
+            try:
+                # Try to see what's available in dbutils
+                print(f"   - dbutils.widgets methods: {[method for method in dir(dbutils.widgets) if not method.startswith('_')]}")
+                print(f"   - dbutils.jobs methods: {[method for method in dir(dbutils.jobs) if not method.startswith('_')]}")
+                print(f"   - dbutils.notebook methods: {[method for method in dir(dbutils.notebook) if not method.startswith('_')]}")
+            except Exception as e:
+                print(f"   - Error inspecting dbutils: {e}")
+        else:
+            print("❌ dbutils not available")
+        
         def get_job_parameter(param_name, default_value):
             """Get parameter from various Databricks job parameter sources."""
             try:
+                # Method 0: Try to get from Spark configuration (sometimes job parameters are set here)
+                try:
+                    from pyspark.sql import SparkSession
+                    spark = SparkSession.getActiveSession()
+                    if spark:
+                        spark_param_value = spark.conf.get(f"spark.databricks.job.param.{param_name}", None)
+                        if spark_param_value is not None:
+                            print(f"✅ Found {param_name} via Spark config: {spark_param_value}")
+                            return spark_param_value
+                except Exception as e:
+                    print(f"⚠️  Spark config access failed for {param_name}: {e}")
+                
                 # Method 1: Try dbutils.widgets (for job parameters) - need to create widget first
                 if 'dbutils' in globals():
                     try:
@@ -49,6 +76,18 @@ def main():
                             return value
                     except Exception as e:
                         print(f"⚠️  dbutils.widgets failed for {param_name}: {e}")
+                    
+                    # Try to get current job run parameters via API
+                    try:
+                        # Get current job and run information
+                        job_id = os.environ.get('DATABRICKS_JOB_ID')
+                        run_id = os.environ.get('DATABRICKS_RUN_ID')
+                        
+                        if job_id and run_id:
+                            print(f"   - Current job_id: {job_id}, run_id: {run_id}")
+                            # This would require API access, which may not be available in job context
+                    except Exception as e:
+                        print(f"⚠️  Job API access failed: {e}")
                 
                 # Method 2: Try environment variables with job parameter prefixes
                 # Databricks often prefixes job parameters
@@ -104,6 +143,29 @@ def main():
         
         print("🚀 DATABRICKS JOB: Starting tabular data generation")
         
+        # Debug: Try to access Databricks job context information
+        print("🔍 DATABRICKS JOB: Checking Databricks job context...")
+        try:
+            if 'dbutils' in globals():
+                # Try to get the current job/run information
+                try:
+                    # Check if we can access the current job run info
+                    current_job = dbutils.entry_point.getDbutils().notebook().getContext()
+                    print(f"   - Job context available: {current_job}")
+                except Exception as e:
+                    print(f"   - Cannot access job context: {e}")
+                
+                # Try to check job parameters through widgets
+                try:
+                    # See what widgets are available
+                    print("   - Checking available widgets...")
+                    # This might show us if there are any pre-configured widgets
+                    pass
+                except Exception as e:
+                    print(f"   - Widget check failed: {e}")
+        except Exception as e:
+            print(f"   - Job context check failed: {e}")
+        
         # Debug: Print ALL available environment variables to find job parameters
         print("🔍 DATABRICKS JOB: ALL environment variables:")
         all_env_vars = dict(os.environ)
@@ -119,6 +181,33 @@ def main():
         relevant_env_vars = {k: v for k, v in os.environ.items() if any(param in k.lower() for param in ['table', 'row', 'column', 'company', 'timestamp', 'endpoint', 'volume', 'databricks', 'job', 'task'])}
         for key, value in relevant_env_vars.items():
             print(f"   - {key}: {value[:100]}..." if len(str(value)) > 100 else f"   - {key}: {value}")
+        
+        # Debug: Check if there are any special Databricks environment variables for job parameters
+        print("🔍 DATABRICKS JOB: Looking for Databricks-specific parameter patterns...")
+        param_patterns = ['PARAMETER_', 'JOB_PARAM_', 'TASK_PARAM_', 'RUN_PARAM_']
+        for pattern in param_patterns:
+            matching_vars = {k: v for k, v in os.environ.items() if pattern in k.upper()}
+            if matching_vars:
+                print(f"   - Found {pattern} pattern variables:")
+                for k, v in matching_vars.items():
+                    print(f"     * {k}: {v}")
+            else:
+                print(f"   - No variables found with pattern: {pattern}")
+        
+        # Debug: Check if parameters are in a JSON format in a single env var
+        json_env_vars = ['DATABRICKS_JOB_PARAMETERS', 'JOB_PARAMETERS', 'TASK_PARAMETERS']
+        for env_var in json_env_vars:
+            value = os.environ.get(env_var)
+            if value:
+                print(f"   - Found potential JSON parameters in {env_var}: {value}")
+                try:
+                    import json
+                    parsed = json.loads(value)
+                    print(f"     * Parsed JSON: {parsed}")
+                except:
+                    print(f"     * Not valid JSON")
+            else:
+                print(f"   - No {env_var} found")
         
         print("📋 DATABRICKS JOB: Resolved parameters:")
         print(f"   - Table name: {table_name}")
