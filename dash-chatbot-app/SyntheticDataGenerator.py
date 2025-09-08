@@ -14,7 +14,7 @@ from databricks.sdk import WorkspaceClient
 import threading
 import io
 from docx import Document
-from dbldatagen import DataGenerator, fakerText
+# Removed dbldatagen import - now using Databricks job approach
 
 class SyntheticDataGenerator:
     def __init__(self, app, endpoint_name):
@@ -43,39 +43,7 @@ class SyntheticDataGenerator:
         column_refs = re.findall(r'<([^<>]+)>', prompt_text)
         return column_refs
     
-    def _substitute_column_references_spark(self, prompt_template, columns):
-        """Create Spark SQL expression to substitute column references in prompt."""
-        # Parse column references from prompt
-        column_refs = self._parse_column_references(prompt_template)
-        
-        if not column_refs:
-            # No column references, return original prompt
-            escaped_prompt = prompt_template.replace("'", "\\'")
-            return f"'{escaped_prompt}'"
-        
-        # Build list of available non-GenAI columns
-        available_columns = {}
-        for col in columns:
-            col_name = col.get('name', '')
-            col_type = col.get('data_type', '')
-            if col_type != 'GenAI Text' and col_name:
-                available_columns[col_name] = col_name
-        
-        # Start with the base prompt template (escape single quotes for SQL)
-        escaped_prompt = prompt_template.replace("'", "\\'")
-        spark_expression = f"'{escaped_prompt}'"
-        
-        # Replace each column reference with a CONCAT operation
-        for col_ref in column_refs:
-            if col_ref in available_columns:
-                # Replace <Column Name> with actual column value
-                placeholder = f"<{col_ref}>"
-                # Use REPLACE function to substitute the placeholder with the column value
-                spark_expression = f"REPLACE({spark_expression}, '{placeholder}', CAST(`{col_ref}` AS STRING))"
-            else:
-                print(f"Warning: Column '{col_ref}' not found or is a GenAI Text column. Leaving placeholder unchanged.")
-        
-        return spark_expression
+    # Removed _substitute_column_references_spark - now handled by Databricks job
     
     def _substitute_column_references_pandas(self, prompt_template, row_data, columns):
         """Substitute column references in prompt for a single row."""
@@ -3240,191 +3208,115 @@ Please incorporate this company information naturally throughout the document to
             }
 
     def _generate_tabular_item(self, table_name, row_count, columns, company_name, company_sector, timestamp):
-        """Generate tabular data using dbldatagen with remote Databricks cluster via Databricks Connect."""
+        """Generate tabular data using Databricks job on remote cluster."""
         try:
-            self.generation_state['current_step'] = f"Generating {row_count} rows of tabular data..."
+            self.generation_state['current_step'] = f"Starting Databricks job for {row_count} rows of tabular data..."
             
-            # Connect to remote Databricks cluster using Databricks Connect
-            try:
-                import os
-                from databricks.connect import DatabricksSession
-                
-                # Get cluster_id from environment or config
-                cluster_id = os.getenv("DATABRICKS_CLUSTER_ID")
-                if not cluster_id:
-                    # Try to read from config.py file
-                    try:
-                        import sys
-                        import os.path
-                        
-                        # Add current directory to path to import config
-                        current_dir = os.path.dirname(os.path.abspath(__file__))
-                        if current_dir not in sys.path:
-                            sys.path.append(current_dir)
-                        
-                        import config
-                        cluster_id = getattr(config, 'DATABRICKS_CLUSTER_ID', None)
-                    except:
-                        cluster_id = "0906-022525-wcmwthm0"  # Fallback to provided cluster_id
-                
-                if not cluster_id:
-                    raise ValueError("DATABRICKS_CLUSTER_ID not found in environment or config")
-                
-                print("🔌 TABULAR GENERATION: Connecting to Databricks cluster...")
-                print(f"   - Cluster ID: {cluster_id}")
-                print(f"   - Host: {os.getenv('DATABRICKS_HOST', 'Not set')}")
-                
-                # Create remote Databricks session
-                spark = DatabricksSession.builder.remote(
-                    host=os.getenv("DATABRICKS_HOST"),
-                    cluster_id=cluster_id
-                ).getOrCreate()
-                
-                print("🚀 TABULAR GENERATION: Connected to remote Databricks cluster (dbldatagen + ai_query)")
-                print(f"   - Row count: {row_count}")
-                print(f"   - GenAI Text columns will generate UNIQUE content for ALL rows")
-                
-            except ImportError as e:
-                print(f"⚠️  TABULAR GENERATION: Databricks Connect not available ({e})")
-                print("🔄 FALLBACK: Using Pandas implementation")
-                print(f"   - Row count: {row_count}")
-                print("   - GenAI Text will generate unique content for ALL rows")
-                return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
-            except Exception as e:
-                print(f"⚠️  TABULAR GENERATION: Failed to connect to Databricks cluster ({e})")
-                print("🔄 FALLBACK: Using Pandas implementation")
-                print(f"   - Row count: {row_count}")
-                print("   - GenAI Text will generate unique content for ALL rows")
-                return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
+            # Import Databricks SDK
+            from databricks.sdk import WorkspaceClient
+            import json
             
-            # Set partition parameters
-            partitions_requested = min(8, max(1, row_count // 1000))  # 1 partition per 1000 rows, max 8
-            spark.conf.set("spark.sql.shuffle.partitions", str(partitions_requested))
+            print("🚀 TABULAR GENERATION: Triggering Databricks job")
+            print(f"   - Table name: {table_name}")
+            print(f"   - Row count: {row_count}")
+            print(f"   - Column count: {len(columns)}")
             
-            # Create DataGenerator
-            data_gen = DataGenerator(spark, rows=row_count, partitions=partitions_requested)
+            # Initialize Databricks client
+            w = WorkspaceClient()
             
-            # Add columns based on configuration
-            for col in columns:
-                col_name = col.get('name', 'unnamed_column')
-                col_type = col.get('data_type', 'Integer')
-                
-                if col_type == 'Integer':
-                    min_val = col.get('min_value', 1)
-                    max_val = col.get('max_value', 100)
-                    data_gen = data_gen.withColumn(col_name, "integer", minValue=min_val, maxValue=max_val)
-                elif col_type == 'First Name':
-                    data_gen = data_gen.withColumn(col_name, text=fakerText("first_name"))
-                elif col_type == 'Last Name':
-                    data_gen = data_gen.withColumn(col_name, text=fakerText("last_name"))
-                elif col_type == 'GenAI Text':
-                    # For GenAI Text, we'll add it after the DataFrame is created
-                    # as it requires using ai_query with existing columns
-                    data_gen = data_gen.withColumn(col_name, "string", values=[""])
-                elif col_type == 'Custom Values':
-                    # For Custom Values, use values and optional weights
-                    custom_values = col.get('custom_values', [''])
-                    use_weights = col.get('use_weights', False)
-                    custom_weights = col.get('custom_weights', [1])
-                    
-                    # Filter out empty values
-                    filtered_values = [v for v in custom_values if v.strip()]
-                    if not filtered_values:
-                        filtered_values = ['DefaultValue']  # Fallback if all values are empty
-                    
-                    if use_weights and len(custom_weights) >= len(filtered_values):
-                        # Use weights if enabled and we have enough weights
-                        filtered_weights = custom_weights[:len(filtered_values)]
-                        data_gen = data_gen.withColumn(col_name, values=filtered_values, weights=filtered_weights)
-                    else:
-                        # Use values without weights
-                        data_gen = data_gen.withColumn(col_name, values=filtered_values)
+            # Job ID for the tabular data generation job
+            job_id = "635184344270819"
             
-            # Only include user-specified columns (no automatic company columns)
-            
-            # Generate the DataFrame
-            self.generation_state['current_step'] = f"Building DataFrame with {row_count} rows..."
-            df = data_gen.build()
-            
-            # Process GenAI Text columns with ai_query
-            genai_columns = [col for col in columns if col.get('data_type') == 'GenAI Text']
-            if genai_columns:
-                print(f"🤖 SPARK AI_QUERY: Processing {len(genai_columns)} GenAI Text column(s)")
-                
-            for col in columns:
-                col_name = col.get('name', 'unnamed_column')
-                col_type = col.get('data_type', 'Integer')
-                
-                if col_type == 'GenAI Text':
-                    prompt_template = col.get('prompt', '')
-                    if prompt_template:
-                        print(f"   - Column '{col_name}': Will generate unique AI text for ALL {row_count} rows")
-                        self.generation_state['current_step'] = f"Generating AI text for column '{col_name}'..."
-                        
-                        # Add table formatting note to the prompt
-                        enhanced_prompt = f"{prompt_template} Note: This will be text data in a table so omit all special formatting."
-                        
-                        # Get max_tokens from column config (default 500 if not specified)
-                        max_tokens = col.get('max_tokens', 500)
-                        
-                        # Create dynamic prompt expression with column substitution
-                        prompt_expression = self._substitute_column_references_spark(enhanced_prompt, columns)
-                        
-                        # Use ai_query to generate text based on the dynamic prompt
-                        from pyspark.sql.functions import expr
-                        
-                        df = df.withColumn(
-                            col_name,
-                            expr(
-                                "ai_query("
-                                f"'{self.endpoint_name}', "
-                                f"request => {prompt_expression}, "
-                                f"params => map('temperature', 0.9, 'top_p', 0.95, 'max_tokens', {max_tokens})"
-                                ")"
-                            )
-                        )
-            
-            # Show first 5 rows for preview
-            self.generation_state['current_step'] = f"Collecting preview data..."
-            preview_data = df.limit(5).toPandas()
-            
-            # Save to CSV
-            filename = f"{table_name}_{timestamp}.csv"
-            local_dir = "./generated_documents"
-            os.makedirs(local_dir, exist_ok=True)
-            csv_path = os.path.join(local_dir, filename)
-            
-            self.generation_state['current_step'] = f"Saving to CSV file..."
-            # Convert full dataset to Pandas and save
-            pandas_df = df.toPandas()
-            pandas_df.to_csv(csv_path, index=False)
-            
-            # Save to volume
-            self.generation_state['current_step'] = f"Saving CSV to volume..."
-            volume_success = self._save_to_volume(csv_path, filename)
-            
-            return {
-                'type': 'tabular',
-                'table_name': table_name,
-                'filename': filename,
-                'path': csv_path,
-                'row_count': row_count,
-                'column_count': len(columns),
-                'columns': [col.get('name', 'unnamed') for col in columns],
-                'preview_data': preview_data.to_html(classes='table table-striped table-sm', index=False) if not preview_data.empty else "No preview available",
-                'timestamp': timestamp,
-                'company_name': company_name,
-                'company_sector': company_sector,
-                'size': os.path.getsize(csv_path) if os.path.exists(csv_path) else 0,
-                'saved_to_volume': volume_success
+            # Prepare parameters for the job
+            job_parameters = {
+                "table_name": table_name,
+                "row_count": str(row_count),
+                "columns": json.dumps(columns),  # Serialize column configurations
+                "company_name": company_name,
+                "company_sector": company_sector,
+                "timestamp": timestamp,
+                "endpoint_name": self.endpoint_name,
+                "volume_path": "conor_smith.synthetic_data_app.synthetic_data_volume"
             }
             
+            self.generation_state['current_step'] = f"Submitting job to Databricks cluster..."
+            
+            # Start the job
+            try:
+                print("🔄 DATABRICKS JOB: Submitting job with parameters:")
+                print(f"   - Job ID: {job_id}")
+                for key, value in job_parameters.items():
+                    if key == "columns":
+                        print(f"   - {key}: [Column configurations - {len(columns)} columns]")
+                    else:
+                        print(f"   - {key}: {value}")
+                
+                run = w.jobs.run_now(job_id=job_id, job_parameters=job_parameters)
+                print(f"✅ DATABRICKS JOB: Started run with ID {run.run_id}")
+                
+                self.generation_state['current_step'] = f"Job running on Databricks cluster (Run ID: {run.run_id})..."
+                
+                # Wait for job completion (with timeout)
+                print(f"⏳ DATABRICKS JOB: Waiting for completion...")
+                import time
+                
+                timeout_seconds = 600  # 10 minute timeout
+                start_time = time.time()
+                
+                while True:
+                    if time.time() - start_time > timeout_seconds:
+                        print(f"⚠️  DATABRICKS JOB: Timeout after {timeout_seconds} seconds")
+                        break
+                    
+                    try:
+                        run_status = w.jobs.get_run(run.run_id)
+                        state = run_status.state.life_cycle_state.value if run_status.state else "UNKNOWN"
+                        
+                        if state in ["TERMINATED", "SKIPPED", "INTERNAL_ERROR"]:
+                            result_state = run_status.state.result_state.value if run_status.state and run_status.state.result_state else "UNKNOWN"
+                            print(f"📋 DATABRICKS JOB: Completed with state: {state}, result: {result_state}")
+                            
+                            if result_state == "SUCCESS":
+                                print("✅ DATABRICKS JOB: Tabular data generation completed successfully")
+                                break
+                            else:
+                                print(f"❌ DATABRICKS JOB: Failed with result: {result_state}")
+                                break
+                        else:
+                            print(f"🔄 DATABRICKS JOB: Status: {state}")
+                            time.sleep(10)  # Wait 10 seconds before checking again
+                            
+                    except Exception as e:
+                        print(f"⚠️  Error checking job status: {e}")
+                        time.sleep(10)
+                
+                # Generate return data (job handles file creation and volume storage)
+                filename = f"{table_name}_{timestamp}.csv"
+                
+                return {
+                    'type': 'tabular',
+                    'table_name': table_name,
+                    'filename': filename,
+                    'job_run_id': run.run_id,
+                    'row_count': row_count,
+                    'column_count': len(columns),
+                    'columns': [col.get('name', 'unnamed') for col in columns],
+                    'preview_data': "Generated by Databricks job - check volume for full data",
+                    'timestamp': timestamp,
+                    'company_name': company_name,
+                    'company_sector': company_sector,
+                    'size': 0,  # Size will be determined by the job
+                    'saved_to_volume': True,  # Job handles volume storage
+                    'generation_method': 'databricks_job'
+                }
+                
+            except Exception as e:
+                print(f"❌ DATABRICKS JOB: Failed to start job - {str(e)}")
+                raise e
+                
         except Exception as e:
-            print(f"⚠️  TABULAR GENERATION: Remote Databricks cluster operation failed ({str(e)})")
+            print(f"⚠️  TABULAR GENERATION: Databricks job failed ({str(e)})")
             print("🔄 FALLBACK: Using Pandas implementation")
-            print(f"   - Row count: {row_count}")
-            print("   - GenAI Text will generate unique content for ALL rows")
-            # Fallback to simple CSV generation
             return self._generate_tabular_fallback(table_name, row_count, columns, company_name, company_sector, timestamp)
 
     def _generate_tabular_fallback(self, table_name, row_count, columns, company_name, company_sector, timestamp):
