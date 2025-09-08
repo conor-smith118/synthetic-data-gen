@@ -38,27 +38,40 @@ def main():
         def get_job_parameter(param_name, default_value):
             """Get parameter from various Databricks job parameter sources."""
             try:
-                # Method 1: Try dbutils.notebook.getArgument (for notebook-based jobs)
+                # Method 1: Try dbutils.widgets (for job parameters) - need to create widget first
                 if 'dbutils' in globals():
                     try:
-                        value = dbutils.notebook.getArgument(param_name, default_value)
+                        # First try to create the widget, then get its value
+                        dbutils.widgets.text(param_name, default_value, param_name)
+                        value = dbutils.widgets.get(param_name)
                         if value != default_value:
-                            print(f"✅ Found {param_name} via dbutils.notebook.getArgument: {value}")
+                            print(f"✅ Found {param_name} via dbutils.widgets: {value}")
                             return value
                     except Exception as e:
-                        print(f"⚠️  dbutils.notebook.getArgument failed for {param_name}: {e}")
+                        print(f"⚠️  dbutils.widgets failed for {param_name}: {e}")
                 
-                # Method 2: Try environment variables (job parameters often set as env vars)
-                env_value = os.environ.get(param_name)
-                if env_value is not None:
-                    print(f"✅ Found {param_name} via environment variable: {env_value}")
-                    return env_value
+                # Method 2: Try environment variables with job parameter prefixes
+                # Databricks often prefixes job parameters
+                for prefix in ['', 'DATABRICKS_', 'JOB_', 'TASK_']:
+                    env_key = f"{prefix}{param_name}"
+                    env_value = os.environ.get(env_key)
+                    if env_value is not None:
+                        print(f"✅ Found {param_name} via environment variable {env_key}: {env_value}")
+                        return env_value
+                    
+                    # Try uppercase version
+                    env_key_upper = env_key.upper()
+                    env_value = os.environ.get(env_key_upper)
+                    if env_value is not None:
+                        print(f"✅ Found {param_name} via uppercase environment variable {env_key_upper}: {env_value}")
+                        return env_value
                 
-                # Method 3: Try with uppercase (sometimes parameters are uppercased)
-                env_value = os.environ.get(param_name.upper())
-                if env_value is not None:
-                    print(f"✅ Found {param_name} via uppercase environment variable: {env_value}")
-                    return env_value
+                # Method 3: Try accessing all environment variables that might contain our parameters
+                # Look for any env var that contains our parameter name
+                for env_key, env_value in os.environ.items():
+                    if param_name.lower() in env_key.lower():
+                        print(f"✅ Found {param_name} via matching environment variable {env_key}: {env_value}")
+                        return env_value
                 
                 # Method 4: Try command line arguments (for script-based jobs)
                 for i, arg in enumerate(sys.argv):
@@ -91,9 +104,19 @@ def main():
         
         print("🚀 DATABRICKS JOB: Starting tabular data generation")
         
-        # Debug: Print all available environment variables (filtered for our parameters)
-        print("🔍 DATABRICKS JOB: Available environment variables:")
-        relevant_env_vars = {k: v for k, v in os.environ.items() if any(param in k.lower() for param in ['table_name', 'row_count', 'columns', 'company', 'timestamp', 'endpoint', 'volume'])}
+        # Debug: Print ALL available environment variables to find job parameters
+        print("🔍 DATABRICKS JOB: ALL environment variables:")
+        all_env_vars = dict(os.environ)
+        for key in sorted(all_env_vars.keys()):
+            value = all_env_vars[key]
+            # Truncate very long values but show first part
+            if len(str(value)) > 100:
+                print(f"   - {key}: {value[:100]}...")
+            else:
+                print(f"   - {key}: {value}")
+        
+        print("🔍 DATABRICKS JOB: Filtered environment variables (containing our parameter names):")
+        relevant_env_vars = {k: v for k, v in os.environ.items() if any(param in k.lower() for param in ['table', 'row', 'column', 'company', 'timestamp', 'endpoint', 'volume', 'databricks', 'job', 'task'])}
         for key, value in relevant_env_vars.items():
             print(f"   - {key}: {value[:100]}..." if len(str(value)) > 100 else f"   - {key}: {value}")
         
@@ -108,6 +131,17 @@ def main():
         # Parse column configurations
         columns = json.loads(columns_json)
         print(f"   - Columns: {len(columns)} configured")
+        
+        # If no columns are configured, add some sample columns for testing
+        if len(columns) == 0:
+            print("⚠️  DATABRICKS JOB: No columns configured, adding sample columns for testing")
+            columns = [
+                {"name": "id", "data_type": "Integer", "min_value": 1, "max_value": 1000},
+                {"name": "first_name", "data_type": "First Name"},
+                {"name": "last_name", "data_type": "Last Name"},
+                {"name": "sample_text", "data_type": "GenAI Text", "prompt": "Write a short professional bio for <first_name> <last_name>", "max_tokens": 100}
+            ]
+            print(f"   - Added {len(columns)} sample columns for testing")
         
     except Exception as e:
         print(f"❌ Error parsing job parameters: {e}")
