@@ -1948,76 +1948,39 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
         
         try:
             from openai import OpenAI
+            from databricks.sdk import WorkspaceClient
+            import base64
             
-            # Try to read config file directly, fallback to environment variables
-            api_key = None
-            base_url = None
+            # Get API key from Databricks secrets
+            print("🔐 Retrieving API key from Databricks secrets...")
             
-            # Try to read config.py file directly
-            try:
-                # Try multiple possible locations for config.py
-                possible_paths = [
-                    os.path.join(os.path.dirname(__file__), 'config.py'),  # Same directory as this file
-                    os.path.join(os.getcwd(), 'config.py'),  # Current working directory
-                    os.path.join(os.getcwd(), 'dash-chatbot-app', 'config.py'),  # In dash-chatbot-app subdir
-                    '/app/python/source_code/dash-chatbot-app/config.py',  # Explicit Databricks path
-                ]
-                
-                config_path = None
-                for path in possible_paths:
-                    print(f"🔍 Checking config at: {path}")
-                    if os.path.exists(path):
-                        config_path = path
-                        print(f"📁 Found config file at: {path}")
-                        break
-                
-                if config_path:
-                    print("📁 Config file found, reading...")
-                    # Read and parse the config file manually
-                    with open(config_path, 'r') as f:
-                        config_content = f.read()
-                    
-                    # Extract API key and host using simple string parsing
-                    for line in config_content.split('\n'):
-                        if line.strip().startswith('DATABRICKS_API_KEY'):
-                            api_key = line.split('=')[1].strip().strip('"\'')
-                        elif line.strip().startswith('DATABRICKS_HOST'):
-                            host = line.split('=')[1].strip().strip('"\'')
-                            base_url = f"{host}/serving-endpoints"
-                    
-                    if api_key:
-                        print(f"✅ Using API key from config.py")
-                    else:
-                        print("⚠️ Config file found but no API key extracted")
-                else:
-                    print("⚠️ Config file not found at any expected path")
-                    print("📋 Checked paths:")
-                    for path in possible_paths:
-                        print(f"   - {path}")
-                        
-                    # Also list the actual contents of the directories we checked
-                    print("📂 Directory listings:")
-                    for path in [os.path.dirname(p) for p in possible_paths[:3]]:  # Skip the explicit path
-                        try:
-                            if os.path.exists(path):
-                                files = os.listdir(path)
-                                print(f"   {path}: {files[:10]}...")  # Show first 10 files
-                        except Exception as e:
-                            print(f"   {path}: Error listing ({e})")
-            except Exception as e:
-                print(f"⚠️ Error reading config file ({e})")
+            def get_secret(scope, key):
+                try:
+                    w = WorkspaceClient()
+                    secret_response = w.secrets.get_secret(scope=scope, key=key)
+                    decoded_secret = base64.b64decode(secret_response.value).decode('utf-8')
+                    return decoded_secret
+                except Exception as e:
+                    print(f"❌ Secret not found or inaccessible: {e}")
+                    return None
+
+            scope_name = "css_secrets"
+            secret_key = "image_gen_key"
+            api_key = get_secret(scope_name, secret_key)
             
-            # Fallback to environment variables if config didn't work
-            if not api_key:
-                print("🔄 Falling back to environment variables")
+            if api_key:
+                print("✅ API key retrieved from Databricks secrets")
+            else:
+                print("❌ Failed to retrieve API key from secrets, trying environment fallback")
                 api_key = os.environ.get('DATABRICKS_TOKEN')
-                base_url = f"{os.environ.get('DATABRICKS_HOST', 'https://e2-demo-field-eng.cloud.databricks.com')}/serving-endpoints"
-                
                 if api_key:
                     print("✅ Using API key from environment variable")
                 else:
-                    print("❌ No API key found in config.py or DATABRICKS_TOKEN environment variable")
+                    print("❌ No API key found in secrets or DATABRICKS_TOKEN environment variable")
                     return []
+            
+            # Get base URL from config or environment
+            base_url = f"{os.environ.get('DATABRICKS_HOST', 'https://e2-demo-field-eng.cloud.databricks.com')}/serving-endpoints"
 
             client = OpenAI(
                 api_key=api_key,
