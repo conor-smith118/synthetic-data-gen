@@ -324,6 +324,8 @@ class SyntheticDataGenerator:
              Input({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-min', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-max', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-min-date', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'date'),
+             Input({'type': 'col-max-date', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'date'),
              Input({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'custom-value-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
              Input({'type': 'custom-weight-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
@@ -353,8 +355,8 @@ class SyntheticDataGenerator:
                 new_value = ctx.triggered[0]['value']
                 
                 # Handle column updates differently from operation updates
-                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-prompt', 'col-max-tokens', 
-                                'custom-value-input', 'custom-weight-input', 'use-weights-checkbox', 'col-ordered']:
+                if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-min-date', 'col-max-date', 
+                                'col-prompt', 'col-max-tokens', 'custom-value-input', 'custom-weight-input', 'use-weights-checkbox', 'col-ordered']:
                     op_id = triggered_comp['op']
                     col_id = triggered_comp['col']
                     
@@ -385,6 +387,13 @@ class SyntheticDataGenerator:
                                             column['max_value'] = 100
                                         if 'ordered_values' not in column:
                                             column['ordered_values'] = False
+                                    elif new_value == 'Date':
+                                        if 'min_date' not in column:
+                                            column['min_date'] = '2020-01-01'
+                                        if 'max_date' not in column:
+                                            column['max_date'] = '2024-12-31'
+                                        if 'ordered_values' not in column:
+                                            column['ordered_values'] = False
                                     elif new_value == 'GenAI Text':
                                         if 'prompt' not in column:
                                             column['prompt'] = ''
@@ -403,6 +412,10 @@ class SyntheticDataGenerator:
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
                                     column['max_value'] = new_value
+                                elif comp_type == 'col-min-date':
+                                    column['min_date'] = new_value
+                                elif comp_type == 'col-max-date':
+                                    column['max_date'] = new_value
                                 elif comp_type == 'col-prompt':
                                     column['prompt'] = new_value
                                 elif comp_type == 'col-max-tokens':
@@ -576,6 +589,13 @@ class SyntheticDataGenerator:
                                         col['max_value'] = 100
                                     if 'ordered_values' not in col:
                                         col['ordered_values'] = False
+                                elif new_type == 'Date':
+                                    if 'min_date' not in col:
+                                        col['min_date'] = '2020-01-01'
+                                    if 'max_date' not in col:
+                                        col['max_date'] = '2024-12-31'
+                                    if 'ordered_values' not in col:
+                                        col['ordered_values'] = False
                                 elif new_type == 'GenAI Text':
                                     if 'prompt' not in col:
                                         col['prompt'] = ''
@@ -610,6 +630,8 @@ class SyntheticDataGenerator:
                             'data_type': 'Integer',
                             'min_value': 1,
                             'max_value': 100,
+                            'min_date': '2020-01-01',
+                            'max_date': '2024-12-31',
                             'prompt': '',
                             'max_tokens': 500,
                             'custom_values': [''],
@@ -679,6 +701,13 @@ class SyntheticDataGenerator:
                                         col['min_value'] = 1
                                     if 'max_value' not in col:
                                         col['max_value'] = 100
+                                    if 'ordered_values' not in col:
+                                        col['ordered_values'] = False
+                                elif new_type == 'Date':
+                                    if 'min_date' not in col:
+                                        col['min_date'] = '2020-01-01'
+                                    if 'max_date' not in col:
+                                        col['max_date'] = '2024-12-31'
                                     if 'ordered_values' not in col:
                                         col['ordered_values'] = False
                                 elif new_type == 'GenAI Text':
@@ -1358,6 +1387,42 @@ class SyntheticDataGenerator:
                         ], width=12)
                     ])
                 ]
+            elif col_type == 'Date':
+                type_inputs = [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Min Date:", className="form-label"),
+                            dcc.DatePickerSingle(
+                                id={'type': 'col-min-date', 'op': op_id, 'col': col_id},
+                                date=col.get('min_date', '2020-01-01'),
+                                display_format='YYYY-MM-DD',
+                                style={'width': '100%', 'fontSize': '14px'}
+                            )
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Max Date:", className="form-label"),
+                            dcc.DatePickerSingle(
+                                id={'type': 'col-max-date', 'op': op_id, 'col': col_id},
+                                date=col.get('max_date', '2024-12-31'),
+                                display_format='YYYY-MM-DD',
+                                style={'width': '100%', 'fontSize': '14px'}
+                            )
+                        ], width=6)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Checklist(
+                                id={'type': 'col-ordered', 'op': op_id, 'col': col_id},
+                                options=[{'label': 'Ordered Values', 'value': 'ordered'}],
+                                value=['ordered'] if col.get('ordered_values', False) else [],
+                                inline=True,
+                                style={'fontSize': '14px'}
+                            ),
+                            html.Small("When unchecked, dates are randomized (default). When checked, dates are generated in sequence.", 
+                                      className="text-muted d-block", style={'fontSize': '12px'})
+                        ], width=12)
+                    ])
+                ]
             elif col_type == 'GenAI Text':
                 type_inputs = [
                     dbc.Row([
@@ -1473,6 +1538,7 @@ class SyntheticDataGenerator:
                                 id={'type': 'col-type', 'op': op_id, 'col': col_id},
                                 options=[
                                     {'label': 'Integer', 'value': 'Integer'},
+                                    {'label': 'Date', 'value': 'Date'},
                                     {'label': 'First Name', 'value': 'First Name'},
                                     {'label': 'Last Name', 'value': 'Last Name'},
                                     {'label': 'GenAI Text', 'value': 'GenAI Text'},
@@ -3363,6 +3429,29 @@ Please incorporate this company information naturally throughout the document to
                     min_val = col.get('min_value', 1)
                     max_val = col.get('max_value', 100)
                     data[col_name] = [random.randint(min_val, max_val) for _ in range(row_count)]
+                elif col_type == 'Date':
+                    # Generate random dates between min_date and max_date
+                    from datetime import datetime, timedelta
+                    min_date_str = col.get('min_date', '2020-01-01')
+                    max_date_str = col.get('max_date', '2024-12-31')
+                    
+                    try:
+                        min_date = datetime.strptime(min_date_str, '%Y-%m-%d')
+                        max_date = datetime.strptime(max_date_str, '%Y-%m-%d')
+                        date_range = (max_date - min_date).days
+                        
+                        # Generate random dates
+                        random_dates = []
+                        for _ in range(row_count):
+                            random_days = random.randint(0, date_range)
+                            random_date = min_date + timedelta(days=random_days)
+                            random_dates.append(random_date.strftime('%Y-%m-%d'))
+                        
+                        data[col_name] = random_dates
+                    except Exception as date_error:
+                        print(f"⚠️  Error generating dates for {col_name}: {date_error}")
+                        # Fallback to default dates
+                        data[col_name] = ['2022-01-01'] * row_count
                 elif col_type == 'First Name':
                     data[col_name] = [fake.first_name() for _ in range(row_count)]
                 elif col_type == 'Last Name':
