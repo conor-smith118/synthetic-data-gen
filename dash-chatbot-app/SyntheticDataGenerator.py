@@ -1647,6 +1647,17 @@ class SyntheticDataGenerator:
                                     {'label': 'Date', 'value': 'Date'},
                                     {'label': 'First Name', 'value': 'First Name'},
                                     {'label': 'Last Name', 'value': 'Last Name'},
+                                    {'label': 'Email', 'value': 'Email'},
+                                    {'label': 'Phone Number', 'value': 'Phone Number'},
+                                    {'label': 'Address', 'value': 'Address'},
+                                    {'label': 'City', 'value': 'City'},
+                                    {'label': 'Country', 'value': 'Country'},
+                                    {'label': 'Country Code', 'value': 'Country Code'},
+                                    {'label': 'Postcode', 'value': 'Postcode'},
+                                    {'label': 'Street Address', 'value': 'Street Address'},
+                                    {'label': 'Company', 'value': 'Company'},
+                                    {'label': 'Credit Card Number', 'value': 'Credit Card Number'},
+                                    {'label': 'Credit Card Provider', 'value': 'Credit Card Provider'},
                                     {'label': 'GenAI Text', 'value': 'GenAI Text'},
                                     {'label': 'Custom Values', 'value': 'Custom Values'}
                                 ],
@@ -3562,6 +3573,28 @@ Please incorporate this company information naturally throughout the document to
                     data[col_name] = [fake.first_name() for _ in range(row_count)]
                 elif col_type == 'Last Name':
                     data[col_name] = [fake.last_name() for _ in range(row_count)]
+                elif col_type == 'Email':
+                    data[col_name] = [fake.email() for _ in range(row_count)]
+                elif col_type == 'Phone Number':
+                    data[col_name] = [fake.phone_number() for _ in range(row_count)]
+                elif col_type == 'Address':
+                    data[col_name] = [fake.address() for _ in range(row_count)]
+                elif col_type == 'City':
+                    data[col_name] = [fake.city() for _ in range(row_count)]
+                elif col_type == 'Country':
+                    data[col_name] = [fake.country() for _ in range(row_count)]
+                elif col_type == 'Country Code':
+                    data[col_name] = [fake.country_code() for _ in range(row_count)]
+                elif col_type == 'Postcode':
+                    data[col_name] = [fake.postcode() for _ in range(row_count)]
+                elif col_type == 'Street Address':
+                    data[col_name] = [fake.street_address() for _ in range(row_count)]
+                elif col_type == 'Company':
+                    data[col_name] = [fake.company() for _ in range(row_count)]
+                elif col_type == 'Credit Card Number':
+                    data[col_name] = [fake.credit_card_number() for _ in range(row_count)]
+                elif col_type == 'Credit Card Provider':
+                    data[col_name] = [fake.credit_card_provider() for _ in range(row_count)]
                 elif col_type == 'GenAI Text':
                     # For GenAI Text, initially fill with placeholder
                     # We'll update these after the DataFrame is created
