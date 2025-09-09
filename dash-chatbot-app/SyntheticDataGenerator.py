@@ -3598,11 +3598,11 @@ Please incorporate this company information naturally throughout the document to
                 elif col_type == 'Credit Card Provider':
                     data[col_name] = [fake.credit_card_provider() for _ in range(row_count)]
                 elif col_type == 'Latitude':
-                    # Keep as strings to avoid decimal serialization issues
-                    data[col_name] = [str(fake.latitude()) for _ in range(row_count)]
+                    # Convert decimal.Decimal to float for proper numeric handling
+                    data[col_name] = [float(fake.latitude()) for _ in range(row_count)]
                 elif col_type == 'Longitude':
-                    # Keep as strings to avoid decimal serialization issues
-                    data[col_name] = [str(fake.longitude()) for _ in range(row_count)]
+                    # Convert decimal.Decimal to float for proper numeric handling
+                    data[col_name] = [float(fake.longitude()) for _ in range(row_count)]
                 elif col_type == 'GenAI Text':
                     # For GenAI Text, initially fill with placeholder
                     # We'll update these after the DataFrame is created
