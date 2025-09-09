@@ -1658,6 +1658,8 @@ class SyntheticDataGenerator:
                                     {'label': 'Company', 'value': 'Company'},
                                     {'label': 'Credit Card Number', 'value': 'Credit Card Number'},
                                     {'label': 'Credit Card Provider', 'value': 'Credit Card Provider'},
+                                    {'label': 'Latitude', 'value': 'Latitude'},
+                                    {'label': 'Longitude', 'value': 'Longitude'},
                                     {'label': 'GenAI Text', 'value': 'GenAI Text'},
                                     {'label': 'Custom Values', 'value': 'Custom Values'}
                                 ],
@@ -3595,6 +3597,10 @@ Please incorporate this company information naturally throughout the document to
                     data[col_name] = [fake.credit_card_number() for _ in range(row_count)]
                 elif col_type == 'Credit Card Provider':
                     data[col_name] = [fake.credit_card_provider() for _ in range(row_count)]
+                elif col_type == 'Latitude':
+                    data[col_name] = [fake.latitude() for _ in range(row_count)]
+                elif col_type == 'Longitude':
+                    data[col_name] = [fake.longitude() for _ in range(row_count)]
                 elif col_type == 'GenAI Text':
                     # For GenAI Text, initially fill with placeholder
                     # We'll update these after the DataFrame is created
