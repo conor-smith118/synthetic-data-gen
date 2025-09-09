@@ -820,6 +820,86 @@ class SyntheticDataGenerator:
                                 debounce=True
                             )
                         ], width=6)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Checklist(
+                                id={'type': 'col-ordered', 'op': config_id['op'], 'col': config_id['col']},
+                                options=[{'label': 'Ordered Values', 'value': 'ordered'}],
+                                value=['ordered'] if (operations and any(
+                                    col.get('ordered_values', False) 
+                                    for op in operations 
+                                    if op.get('id') == config_id['op'] and op.get('type') == 'tabular'
+                                    for col in op.get('config', {}).get('columns', [])
+                                    if col.get('id') == config_id['col']
+                                )) else [],
+                                inline=True,
+                                style={'fontSize': '14px'}
+                            ),
+                            html.Small("When unchecked, values are randomized (default). When checked, values are generated in sequence.", 
+                                      className="text-muted d-block", style={'fontSize': '12px'})
+                        ], width=12)
+                    ])
+                ]
+            elif col_type == 'Date':
+                # Get existing date values for this column
+                min_date, max_date = '2020-01-01', '2024-12-31'
+                
+                if operations:
+                    op_id = config_id['op']
+                    col_id = config_id['col']
+                    
+                    # Find the operation and column to get existing values
+                    for op in operations:
+                        if op['id'] == op_id and op['type'] == 'tabular':
+                            columns = op['config'].get('columns', [])
+                            for col in columns:
+                                if col['id'] == col_id:
+                                    min_date = col.get('min_date', '2020-01-01')
+                                    max_date = col.get('max_date', '2024-12-31')
+                                    break
+                            break
+                
+                # Show date pickers for Date type
+                return [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Min Date:", className="form-label"),
+                            dcc.DatePickerSingle(
+                                id={'type': 'col-min-date', 'op': config_id['op'], 'col': config_id['col']},
+                                date=min_date,
+                                display_format='YYYY-MM-DD',
+                                style={'width': '100%', 'fontSize': '14px'}
+                            )
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Max Date:", className="form-label"),
+                            dcc.DatePickerSingle(
+                                id={'type': 'col-max-date', 'op': config_id['op'], 'col': config_id['col']},
+                                date=max_date,
+                                display_format='YYYY-MM-DD',
+                                style={'width': '100%', 'fontSize': '14px'}
+                            )
+                        ], width=6)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Checklist(
+                                id={'type': 'col-ordered', 'op': config_id['op'], 'col': config_id['col']},
+                                options=[{'label': 'Ordered Values', 'value': 'ordered'}],
+                                value=['ordered'] if (operations and any(
+                                    col.get('ordered_values', False) 
+                                    for op in operations 
+                                    if op.get('id') == config_id['op'] and op.get('type') == 'tabular'
+                                    for col in op.get('config', {}).get('columns', [])
+                                    if col.get('id') == config_id['col']
+                                )) else [],
+                                inline=True,
+                                style={'fontSize': '14px'}
+                            ),
+                            html.Small("When unchecked, dates are randomized (default). When checked, dates are generated in sequence.", 
+                                      className="text-muted d-block", style={'fontSize': '12px'})
+                        ], width=12)
                     ])
                 ]
             elif col_type == 'GenAI Text':
@@ -945,6 +1025,32 @@ class SyntheticDataGenerator:
                         )
                     ], width=12)
                 ], className="mt-2", style=checkbox_style))
+                
+                # Add ordered values checkbox for Custom Values
+                # Get existing ordered_values state for this column
+                ordered_values_state = False
+                if operations:
+                    for op in operations:
+                        if op.get('id') == config_id['op'] and op.get('type') == 'tabular':
+                            for col in op.get('config', {}).get('columns', []):
+                                if col.get('id') == config_id['col']:
+                                    ordered_values_state = col.get('ordered_values', False)
+                                    break
+                            break
+                
+                children.append(dbc.Row([
+                    dbc.Col([
+                        dbc.Checklist(
+                            id={'type': 'col-ordered', 'op': config_id['op'], 'col': config_id['col']},
+                            options=[{'label': 'Ordered Values', 'value': 'ordered'}],
+                            value=['ordered'] if ordered_values_state else [],
+                            inline=True,
+                            style={'fontSize': '14px'}
+                        ),
+                        html.Small("When unchecked, values are selected randomly (default). When checked, values are selected in sequence.", 
+                                  className="text-muted d-block", style={'fontSize': '12px'})
+                    ], width=12)
+                ], className="mt-2"))
                 
                 return children
             else:
