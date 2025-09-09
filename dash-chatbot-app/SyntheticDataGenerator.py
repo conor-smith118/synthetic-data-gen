@@ -327,7 +327,8 @@ class SyntheticDataGenerator:
              Input({'type': 'col-prompt', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'custom-value-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
              Input({'type': 'custom-weight-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
+             Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-ordered', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
             State('operations-store', 'data'),
             prevent_initial_call=True
         )
@@ -353,7 +354,7 @@ class SyntheticDataGenerator:
                 
                 # Handle column updates differently from operation updates
                 if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-prompt', 'col-max-tokens', 
-                                'custom-value-input', 'custom-weight-input', 'use-weights-checkbox']:
+                                'custom-value-input', 'custom-weight-input', 'use-weights-checkbox', 'col-ordered']:
                     op_id = triggered_comp['op']
                     col_id = triggered_comp['col']
                     
@@ -382,6 +383,8 @@ class SyntheticDataGenerator:
                                             column['min_value'] = 1
                                         if 'max_value' not in column:
                                             column['max_value'] = 100
+                                        if 'ordered_values' not in column:
+                                            column['ordered_values'] = False
                                     elif new_value == 'GenAI Text':
                                         if 'prompt' not in column:
                                             column['prompt'] = ''
@@ -394,6 +397,8 @@ class SyntheticDataGenerator:
                                             column['use_weights'] = False
                                         if 'custom_weights' not in column:
                                             column['custom_weights'] = [1]
+                                        if 'ordered_values' not in column:
+                                            column['ordered_values'] = False
                                 elif comp_type == 'col-min':
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
@@ -427,6 +432,10 @@ class SyntheticDataGenerator:
                                     # Handle weights checkbox toggle
                                     use_weights = bool(new_value and 'use_weights' in new_value)
                                     column['use_weights'] = use_weights
+                                elif comp_type == 'col-ordered':
+                                    # Handle ordered values checkbox toggle
+                                    ordered_values = bool(new_value and 'ordered' in new_value)
+                                    column['ordered_values'] = ordered_values
                                 
                                 # Update configured status
                                 table_name = op['config'].get('table_name', '')
@@ -565,6 +574,8 @@ class SyntheticDataGenerator:
                                         col['min_value'] = 1
                                     if 'max_value' not in col:
                                         col['max_value'] = 100
+                                    if 'ordered_values' not in col:
+                                        col['ordered_values'] = False
                                 elif new_type == 'GenAI Text':
                                     if 'prompt' not in col:
                                         col['prompt'] = ''
@@ -603,7 +614,8 @@ class SyntheticDataGenerator:
                             'max_tokens': 500,
                             'custom_values': [''],
                             'use_weights': False,
-                            'custom_weights': [1]
+                            'custom_weights': [1],
+                            'ordered_values': False
                         }
                         op['config']['columns'].append(new_column)
                         
@@ -667,6 +679,8 @@ class SyntheticDataGenerator:
                                         col['min_value'] = 1
                                     if 'max_value' not in col:
                                         col['max_value'] = 100
+                                    if 'ordered_values' not in col:
+                                        col['ordered_values'] = False
                                 elif new_type == 'GenAI Text':
                                     if 'prompt' not in col:
                                         col['prompt'] = ''
@@ -1329,6 +1343,19 @@ class SyntheticDataGenerator:
                                 debounce=True
                             )
                         ], width=6)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Checklist(
+                                id={'type': 'col-ordered', 'op': op_id, 'col': col_id},
+                                options=[{'label': 'Ordered Values', 'value': 'ordered'}],
+                                value=['ordered'] if col.get('ordered_values', False) else [],
+                                inline=True,
+                                style={'fontSize': '14px'}
+                            ),
+                            html.Small("When unchecked, values are randomized (default). When checked, values are generated in sequence.", 
+                                      className="text-muted d-block", style={'fontSize': '12px'})
+                        ], width=12)
                     ])
                 ]
             elif col_type == 'GenAI Text':
@@ -1408,6 +1435,21 @@ class SyntheticDataGenerator:
                         )
                     ], width=12)
                 ], className="mt-2", style=checkbox_style))
+                
+                # Add ordered values checkbox
+                type_inputs.append(dbc.Row([
+                    dbc.Col([
+                        dbc.Checklist(
+                            id={'type': 'col-ordered', 'op': op_id, 'col': col_id},
+                            options=[{'label': 'Ordered Values', 'value': 'ordered'}],
+                            value=['ordered'] if col.get('ordered_values', False) else [],
+                            inline=True,
+                            style={'fontSize': '14px'}
+                        ),
+                        html.Small("When unchecked, values are randomized (default). When checked, values are selected in sequence.", 
+                                  className="text-muted d-block", style={'fontSize': '12px'})
+                    ], width=12)
+                ], className="mt-2"))
             else:
                 # No additional inputs for First Name or Last Name
                 type_inputs = []
