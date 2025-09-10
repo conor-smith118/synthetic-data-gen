@@ -159,6 +159,18 @@ class SyntheticDataGenerator:
             if not n_clicks or not operations:
                 return dash.no_update, dash.no_update, dash.no_update
             
+            # Small delay to ensure any pending column type updates have completed
+            import time
+            time.sleep(0.1)  # 100ms delay to allow callback queue to process
+            
+            # Debug: Log column types before generation
+            print("🔍 DEBUG: Operations before generation:")
+            for i, op in enumerate(operations):
+                if op.get('type') == 'tabular' and 'columns' in op.get('config', {}):
+                    print(f"   Operation {i+1}: {op.get('config', {}).get('table_name', 'unnamed')}")
+                    for col in op['config']['columns']:
+                        print(f"      - {col.get('name', 'unnamed')}: {col.get('data_type', 'unknown')}")
+            
             # Filter only configured operations
             configured_ops = [op for op in operations if op.get('configured', False)]
             if not configured_ops:
@@ -378,6 +390,7 @@ class SyntheticDataGenerator:
                                 if comp_type == 'col-name':
                                     column['name'] = new_value
                                 elif comp_type == 'col-type':
+                                    print(f"🔄 Column type changed: {column.get('name', 'unnamed')} → {new_value}")
                                     column['data_type'] = new_value
                                     # Initialize type-specific fields when type changes
                                     if new_value == 'Integer':
@@ -1664,7 +1677,8 @@ class SyntheticDataGenerator:
                                     {'label': 'Custom Values', 'value': 'Custom Values'}
                                 ],
                                 value=col_type,
-                                style={'font-size': '14px'}
+                                style={'font-size': '14px'},
+                                debounce=True
                             )
                         ], width=6),
                         dbc.Col([
