@@ -1677,8 +1677,7 @@ class SyntheticDataGenerator:
                                     {'label': 'Custom Values', 'value': 'Custom Values'}
                                 ],
                                 value=col_type,
-                                style={'font-size': '14px'},
-                                debounce=True
+                                style={'font-size': '14px'}
                             )
                         ], width=6),
                         dbc.Col([
