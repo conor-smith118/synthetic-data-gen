@@ -1631,6 +1631,60 @@ class SyntheticDataGenerator:
                         ], width=12)
                     ])
                 ]
+            elif col_type == 'Country Defined Coordinates':
+                # Get country codes list
+                try:
+                    import pycountry
+                    alpha2_codes = [country.alpha_2 for country in pycountry.countries]
+                    if 'US' in alpha2_codes:
+                        alpha2_codes.remove('US')
+                        alpha2_codes.insert(0, 'US')
+                    country_options = [{'label': f"{code}", 'value': code} for code in alpha2_codes[:50]]  # Limit to first 50
+                except ImportError:
+                    # Fallback if pycountry not available
+                    country_options = [
+                        {'label': 'US', 'value': 'US'},
+                        {'label': 'CA', 'value': 'CA'}, 
+                        {'label': 'GB', 'value': 'GB'},
+                        {'label': 'DE', 'value': 'DE'},
+                        {'label': 'FR', 'value': 'FR'},
+                        {'label': 'JP', 'value': 'JP'},
+                        {'label': 'AU', 'value': 'AU'}
+                    ]
+                
+                type_inputs = [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Country Code:", className="form-label"),
+                            dcc.Dropdown(
+                                id={'type': 'col-country-code', 'op': op_id, 'col': col_id},
+                                options=country_options,
+                                value=col.get('country_code', 'US'),
+                                clearable=False,
+                                style={'fontSize': '14px'}
+                            )
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Options:", className="form-label"),
+                            dbc.Checklist(
+                                id={'type': 'col-coords-only', 'op': op_id, 'col': col_id},
+                                options=[{'label': 'Coordinates Only', 'value': 'coords_only'}],
+                                value=['coords_only'] if col.get('coords_only', False) else [],
+                                inline=True,
+                                style={'fontSize': '14px'}
+                            )
+                        ], width=6)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Small([
+                                "This will create multiple columns from the base name:", html.Br(),
+                                "• {name}_latitude, {name}_longitude", html.Br(),
+                                "• If not coordinates only: {name}_city, {name}_country_code, {name}_timezone"
+                            ], className="text-muted", style={'fontSize': '12px'})
+                        ], width=12)
+                    ], className="mt-2")
+                ]
             elif col_type == 'GenAI Text':
                 type_inputs = [
                     dbc.Row([
