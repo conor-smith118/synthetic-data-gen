@@ -342,7 +342,9 @@ class SyntheticDataGenerator:
              Input({'type': 'custom-value-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
              Input({'type': 'custom-weight-input', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL, 'idx': dash.dependencies.ALL}, 'value'),
              Input({'type': 'use-weights-checkbox', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
-             Input({'type': 'col-ordered', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
+             Input({'type': 'col-ordered', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-country-code', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'col-coords-only', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value')],
             State('operations-store', 'data'),
             prevent_initial_call=True
         )
@@ -368,7 +370,8 @@ class SyntheticDataGenerator:
                 
                 # Handle column updates differently from operation updates
                 if comp_type in ['col-name', 'col-type', 'col-min', 'col-max', 'col-min-date', 'col-max-date', 
-                                'col-prompt', 'col-max-tokens', 'custom-value-input', 'custom-weight-input', 'use-weights-checkbox', 'col-ordered']:
+                                'col-prompt', 'col-max-tokens', 'custom-value-input', 'custom-weight-input', 'use-weights-checkbox', 'col-ordered',
+                                'col-country-code', 'col-coords-only']:
                     op_id = triggered_comp['op']
                     col_id = triggered_comp['col']
                     
@@ -421,6 +424,11 @@ class SyntheticDataGenerator:
                                             column['custom_weights'] = [1]
                                         if 'ordered_values' not in column:
                                             column['ordered_values'] = False
+                                    elif new_value == 'Country Defined Coordinates':
+                                        if 'country_code' not in column:
+                                            column['country_code'] = 'US'
+                                        if 'coords_only' not in column:
+                                            column['coords_only'] = False
                                 elif comp_type == 'col-min':
                                     column['min_value'] = new_value
                                 elif comp_type == 'col-max':
@@ -462,6 +470,13 @@ class SyntheticDataGenerator:
                                     # Handle ordered values checkbox toggle
                                     ordered_values = bool(new_value and 'ordered' in new_value)
                                     column['ordered_values'] = ordered_values
+                                elif comp_type == 'col-country-code':
+                                    # Handle country code selection for Country Defined Coordinates
+                                    column['country_code'] = new_value if new_value else 'US'
+                                elif comp_type == 'col-coords-only':
+                                    # Handle coordinates only checkbox toggle
+                                    coords_only = bool(new_value and 'coords_only' in new_value)
+                                    column['coords_only'] = coords_only
                                 
                                 # Update configured status
                                 table_name = op['config'].get('table_name', '')
@@ -968,6 +983,80 @@ class SyntheticDataGenerator:
                             )
                         ], width=6)
                     ])
+                ]
+            elif col_type == 'Country Defined Coordinates':
+                # Get existing values for this column
+                country_code = 'US'  # Default to US
+                coords_only = False  # Default to include all location data
+                
+                if operations:
+                    op_id = config_id['op']
+                    col_id = config_id['col']
+                    
+                    # Find the operation and column to get existing values
+                    for op in operations:
+                        if op['id'] == op_id and op['type'] == 'tabular':
+                            columns = op['config'].get('columns', [])
+                            for col in columns:
+                                if col['id'] == col_id:
+                                    country_code = col.get('country_code', 'US')
+                                    coords_only = col.get('coords_only', False)
+                                    break
+                            break
+                
+                # Get country codes list
+                try:
+                    import pycountry
+                    alpha2_codes = [country.alpha_2 for country in pycountry.countries]
+                    if 'US' in alpha2_codes:
+                        alpha2_codes.remove('US')
+                        alpha2_codes.insert(0, 'US')
+                    country_options = [{'label': f"{code}", 'value': code} for code in alpha2_codes[:50]]  # Limit to first 50
+                except ImportError:
+                    # Fallback if pycountry not available
+                    country_options = [
+                        {'label': 'US', 'value': 'US'},
+                        {'label': 'CA', 'value': 'CA'}, 
+                        {'label': 'GB', 'value': 'GB'},
+                        {'label': 'DE', 'value': 'DE'},
+                        {'label': 'FR', 'value': 'FR'},
+                        {'label': 'JP', 'value': 'JP'},
+                        {'label': 'AU', 'value': 'AU'}
+                    ]
+                
+                # Show country selector and coordinates only option
+                return [
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Country Code:", className="form-label"),
+                            dcc.Dropdown(
+                                id={'type': 'col-country-code', 'op': config_id['op'], 'col': config_id['col']},
+                                options=country_options,
+                                value=country_code,
+                                clearable=False,
+                                style={'fontSize': '14px'}
+                            )
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Options:", className="form-label"),
+                            dbc.Checklist(
+                                id={'type': 'col-coords-only', 'op': config_id['op'], 'col': config_id['col']},
+                                options=[{'label': 'Coordinates Only', 'value': 'coords_only'}],
+                                value=['coords_only'] if coords_only else [],
+                                inline=True,
+                                style={'fontSize': '14px'}
+                            )
+                        ], width=6)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Small([
+                                "This will create multiple columns from the base name:", html.Br(),
+                                "• {name}_latitude, {name}_longitude", html.Br(),
+                                "• If not coordinates only: {name}_city, {name}_country_code, {name}_timezone"
+                            ], className="text-muted", style={'fontSize': '12px'})
+                        ], width=12)
+                    ], className="mt-2")
                 ]
             elif col_type == 'Custom Values':
                 # Get existing custom values for this column
@@ -1673,6 +1762,7 @@ class SyntheticDataGenerator:
                                     {'label': 'Credit Card Provider', 'value': 'Credit Card Provider'},
                                     {'label': 'Latitude', 'value': 'Latitude'},
                                     {'label': 'Longitude', 'value': 'Longitude'},
+                                    {'label': 'Country Defined Coordinates', 'value': 'Country Defined Coordinates'},
                                     {'label': 'GenAI Text', 'value': 'GenAI Text'},
                                     {'label': 'Custom Values', 'value': 'Custom Values'}
                                 ],
@@ -3616,6 +3706,37 @@ Please incorporate this company information naturally throughout the document to
                 elif col_type == 'Longitude':
                     # Convert decimal.Decimal to float for proper numeric handling
                     data[col_name] = [float(fake.longitude()) for _ in range(row_count)]
+                elif col_type == 'Country Defined Coordinates':
+                    # Generate location data for specific country
+                    country_code = col.get('country_code', 'US')
+                    coords_only = col.get('coords_only', False)
+                    
+                    # Generate location tuples
+                    locations = []
+                    for _ in range(row_count):
+                        try:
+                            location_tuple = fake.local_latlng(country_code=country_code, coords_only=coords_only)
+                            if location_tuple:
+                                locations.append(location_tuple)
+                            else:
+                                # Fallback if no location found
+                                location_tuple = fake.local_latlng(country_code='US', coords_only=coords_only)
+                                locations.append(location_tuple if location_tuple else ('40.712776', '-74.005974'))
+                        except Exception:
+                            # Ultimate fallback
+                            if coords_only:
+                                locations.append(('40.712776', '-74.005974'))
+                            else:
+                                locations.append(('40.712776', '-74.005974', 'New York', 'US', 'America/New_York'))
+                    
+                    # Split into separate columns
+                    data[f"{col_name}_latitude"] = [str(loc[0]) for loc in locations]
+                    data[f"{col_name}_longitude"] = [str(loc[1]) for loc in locations]
+                    
+                    if not coords_only and len(locations[0]) >= 5:
+                        data[f"{col_name}_city"] = [str(loc[2]) for loc in locations]
+                        data[f"{col_name}_country_code"] = [str(loc[3]) for loc in locations]
+                        data[f"{col_name}_timezone"] = [str(loc[4]) for loc in locations]
                 elif col_type == 'GenAI Text':
                     # For GenAI Text, initially fill with placeholder
                     # We'll update these after the DataFrame is created
