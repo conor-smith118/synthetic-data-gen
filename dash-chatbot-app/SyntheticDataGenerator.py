@@ -512,8 +512,34 @@ class SyntheticDataGenerator:
                             elif comp_type == 'tabular-name':
                                 op['config']['table_name'] = new_value
                             elif comp_type == 'tabular-rows':
-                                # Store the row count (validation/clamping handled by separate callback)
-                                op['config']['row_count'] = new_value
+                                # Validate and clamp row count based on GenAI Text presence
+                                print(f"🔧 MAIN CALLBACK: Processing row count change to {new_value}")
+                                
+                                if new_value is not None:
+                                    # Check if operation has GenAI Text columns
+                                    has_genai = any(col.get('data_type') == 'GenAI Text' for col in op['config'].get('columns', []))
+                                    max_allowed = 1000 if has_genai else 1000000
+                                    
+                                    print(f"   - Has GenAI: {has_genai}")
+                                    print(f"   - Max allowed: {max_allowed:,}")
+                                    print(f"   - Input value: {new_value}")
+                                    
+                                    # Clamp the value
+                                    if new_value < 1:
+                                        clamped_value = 1
+                                        print(f"   - Clamped {new_value} → {clamped_value} (minimum)")
+                                    elif new_value > max_allowed:
+                                        clamped_value = max_allowed
+                                        limit_reason = "GenAI Text columns" if has_genai else "system limits"
+                                        print(f"   - Clamped {new_value:,} → {clamped_value:,} due to {limit_reason}")
+                                    else:
+                                        clamped_value = new_value
+                                        print(f"   - Value {new_value:,} is within limits")
+                                    
+                                    op['config']['row_count'] = clamped_value
+                                else:
+                                    op['config']['row_count'] = 1000  # Default
+                                    print("   - Using default value 1000")
                             
                             # Mark as configured based on operation type
                             if op['type'] == 'tabular':
@@ -1315,97 +1341,8 @@ class SyntheticDataGenerator:
                 print(f"Error removing custom value: {str(e)}")
                 return dash.no_update
         
-        # Dynamic row count validation and clamping callback
-        @self.app.callback(
-            [Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'value'),
-             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'max'),
-             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'placeholder')],
-            [Input({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'value'),
-             Input('operations-store', 'data')],
-            State({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'id'),
-            prevent_initial_call=True
-        )
-        def validate_and_clamp_row_count(current_value, operations, input_id):
-            try:
-                print(f"🚀 CALLBACK TRIGGERED: current_value={current_value}, type={type(current_value)}")
-                
-                if not operations:
-                    print("   - No operations found, using defaults")
-                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
-                
-                # Find the specific operation
-                op_id = input_id['index']
-                print(f"   - Looking for operation: {op_id}")
-                target_operation = None
-                for op in operations:
-                    if op['id'] == op_id and op['type'] == 'tabular':
-                        target_operation = op
-                        break
-                
-                if not target_operation:
-                    print(f"   - Operation {op_id} not found, using defaults")
-                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
-                
-                # Check if operation has GenAI Text columns with extensive debugging
-                columns = target_operation['config'].get('columns', [])
-                
-                print(f"🔍 ROW VALIDATION DEBUG: Operation {op_id}")
-                print(f"   - Total columns: {len(columns)}")
-                
-                # Debug each column
-                genai_columns = []
-                for i, col in enumerate(columns):
-                    col_name = col.get('name', f'unnamed_{i}')
-                    col_type = col.get('data_type', 'Unknown')
-                    print(f"   - Column {i+1}: '{col_name}' = '{col_type}'")
-                    if col_type == 'GenAI Text':
-                        genai_columns.append(col_name)
-                
-                has_genai = len(genai_columns) > 0
-                print(f"   - GenAI columns found: {genai_columns}")
-                print(f"   - Has GenAI: {has_genai}")
-                
-                # Determine max value and placeholder - with explicit logic
-                if has_genai:
-                    max_value = 1000
-                    placeholder = "Enter number of rows (1-1,000) - Limited due to GenAI Text"
-                    print(f"   - GENAI DETECTED: Setting max_value = 1000")
-                else:
-                    max_value = 1000000
-                    placeholder = "Enter number of rows (1-1,000,000)"
-                    print(f"   - NO GENAI: Setting max_value = 1,000,000")
-                
-                print(f"   - Final max value: {max_value:,}")
-                print(f"   - Current input value: {current_value}")
-                
-                # Clamp the current value
-                if current_value is not None:
-                    original_value = current_value
-                    if current_value < 1:
-                        clamped_value = 1
-                        print(f"🔧 ROW VALIDATION: Clamped {original_value} → {clamped_value} (minimum)")
-                    elif current_value > max_value:
-                        clamped_value = max_value
-                        limit_reason = "GenAI Text columns" if has_genai else "system limits"
-                        print(f"🔧 ROW VALIDATION: Clamped {original_value:,} → {clamped_value:,} due to {limit_reason}")
-                    else:
-                        clamped_value = current_value
-                        print(f"✅ ROW VALIDATION: Value {current_value:,} is within limits (Max: {max_value:,})")
-                        
-                    # Final summary
-                    if clamped_value != original_value:
-                        print(f"📊 FINAL: {original_value:,} → {clamped_value:,} (GenAI: {has_genai}, Max: {max_value:,})")
-                else:
-                    clamped_value = 1000  # Default value
-                    print(f"📊 ROW COUNT: Using default value 1000 (GenAI: {has_genai}, Max: {max_value:,})")
-                
-                return clamped_value, max_value, placeholder
-                
-            except Exception as e:
-                print(f"❌ Error in row count validation: {e}")
-                import traceback
-                traceback.print_exc()
-                return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
+        # NOTE: Row count validation is now handled directly in the main operations callback above
+        # to avoid race conditions between multiple callbacks
 
     def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
         """Create input fields for custom values and optional weights."""
