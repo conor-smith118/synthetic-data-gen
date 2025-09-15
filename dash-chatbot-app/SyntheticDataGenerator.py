@@ -1535,10 +1535,10 @@ class SyntheticDataGenerator:
                     id={'type': 'tabular-rows', 'index': op_id},
                     type="number",
                     min=1,
-                    max=100000000,  # Increase max to allow larger numbers for testing
+                    # NO MAX ATTRIBUTE - let our Python code handle validation
                     step=1,
                     value=config.get('row_count', 1000),
-                    placeholder="Enter number of rows (1-1,000,000)",
+                    placeholder="Enter number of rows (any size - validation applied in backend)",
                     debounce=True,  # Add debounce back for smooth typing experience
                     className="mb-1",
                     # Add input validation attributes
