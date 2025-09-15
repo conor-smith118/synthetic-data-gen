@@ -513,13 +513,18 @@ class SyntheticDataGenerator:
                                 op['config']['table_name'] = new_value
                             elif comp_type == 'tabular-rows':
                                 # Validate and clamp row count based on GenAI Text presence
-                                print(f"🔧 MAIN CALLBACK: Processing row count change to {new_value}")
+                                print(f"🔧 MAIN CALLBACK: Processing row count change")
+                                print(f"   - Raw new_value: {repr(new_value)} (type: {type(new_value)})")
+                                print(f"   - Current stored value: {op['config'].get('row_count', 'NOT_SET')}")
                                 
                                 if new_value is not None and str(new_value).strip() != '':
                                     try:
                                         # Convert to integer if it's a string
                                         if isinstance(new_value, str):
+                                            print(f"   - Converting string '{new_value}' to int")
                                             new_value = int(new_value)
+                                        
+                                        print(f"   - Processed value: {new_value}")
                                         
                                         # Check if operation has GenAI Text columns
                                         has_genai = any(col.get('data_type') == 'GenAI Text' for col in op['config'].get('columns', []))
@@ -541,10 +546,12 @@ class SyntheticDataGenerator:
                                             clamped_value = new_value
                                             print(f"   - Value {new_value:,} is within limits")
                                         
+                                        print(f"   - Setting row_count to: {clamped_value}")
                                         op['config']['row_count'] = clamped_value
                                         
                                     except (ValueError, TypeError) as e:
-                                        print(f"   - Invalid value '{new_value}', keeping current: {op['config'].get('row_count', 1000)}")
+                                        print(f"   - ERROR converting '{new_value}': {e}")
+                                        print(f"   - Keeping current: {op['config'].get('row_count', 1000)}")
                                         # Don't change the stored value for invalid inputs
                                 else:
                                     # For None or empty values during typing, don't change stored value
@@ -1528,7 +1535,7 @@ class SyntheticDataGenerator:
                     id={'type': 'tabular-rows', 'index': op_id},
                     type="number",
                     min=1,
-                    max=1000000,  # Will be dynamically updated by validation callback
+                    max=100000000,  # Increase max to allow larger numbers for testing
                     step=1,
                     value=config.get('row_count', 1000),
                     placeholder="Enter number of rows (1-1,000,000)",
