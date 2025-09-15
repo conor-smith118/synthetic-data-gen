@@ -1341,26 +1341,37 @@ class SyntheticDataGenerator:
                 if not target_operation:
                     return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
                 
-                # Check if operation has GenAI Text columns
+                # Check if operation has GenAI Text columns with extensive debugging
                 columns = target_operation['config'].get('columns', [])
-                has_genai = any(col.get('data_type') == 'GenAI Text' for col in columns)
                 
-                # Debug logging to track GenAI detection
-                genai_columns = [col.get('name', 'unnamed') for col in columns if col.get('data_type') == 'GenAI Text']
                 print(f"🔍 ROW VALIDATION DEBUG: Operation {op_id}")
                 print(f"   - Total columns: {len(columns)}")
-                print(f"   - GenAI columns: {genai_columns}")
+                
+                # Debug each column
+                genai_columns = []
+                for i, col in enumerate(columns):
+                    col_name = col.get('name', f'unnamed_{i}')
+                    col_type = col.get('data_type', 'Unknown')
+                    print(f"   - Column {i+1}: '{col_name}' = '{col_type}'")
+                    if col_type == 'GenAI Text':
+                        genai_columns.append(col_name)
+                
+                has_genai = len(genai_columns) > 0
+                print(f"   - GenAI columns found: {genai_columns}")
                 print(f"   - Has GenAI: {has_genai}")
                 
-                # Determine max value and placeholder
+                # Determine max value and placeholder - with explicit logic
                 if has_genai:
                     max_value = 1000
                     placeholder = "Enter number of rows (1-1,000) - Limited due to GenAI Text"
+                    print(f"   - GENAI DETECTED: Setting max_value = 1000")
                 else:
                     max_value = 1000000
                     placeholder = "Enter number of rows (1-1,000,000)"
+                    print(f"   - NO GENAI: Setting max_value = 1,000,000")
                 
-                print(f"   - Max value set to: {max_value:,}")
+                print(f"   - Final max value: {max_value:,}")
+                print(f"   - Current input value: {current_value}")
                 
                 # Clamp the current value
                 if current_value is not None:
