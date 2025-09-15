@@ -512,7 +512,21 @@ class SyntheticDataGenerator:
                             elif comp_type == 'tabular-name':
                                 op['config']['table_name'] = new_value
                             elif comp_type == 'tabular-rows':
-                                op['config']['row_count'] = new_value
+                                # Validate row count based on GenAI Text presence
+                                validated_value = new_value
+                                if validated_value is not None:
+                                    # Check if operation has GenAI Text columns
+                                    has_genai = any(col.get('data_type') == 'GenAI Text' for col in op['config'].get('columns', []))
+                                    max_allowed = 1000 if has_genai else 1000000
+                                    
+                                    # Ensure value is within bounds
+                                    if validated_value < 1:
+                                        validated_value = 1
+                                    elif validated_value > max_allowed:
+                                        validated_value = max_allowed
+                                        print(f"⚠️  Row count limited to {max_allowed:,} due to {'GenAI Text columns' if has_genai else 'system limits'}")
+                                
+                                op['config']['row_count'] = validated_value
                             
                             # Mark as configured based on operation type
                             if op['type'] == 'tabular':
@@ -1313,6 +1327,37 @@ class SyntheticDataGenerator:
             except Exception as e:
                 print(f"Error removing custom value: {str(e)}")
                 return dash.no_update
+        
+        # Dynamic row count validation callback
+        @self.app.callback(
+            [Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'max'),
+             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'placeholder')],
+            Input('operations-store', 'data'),
+            State({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'id'),
+            prevent_initial_call=True
+        )
+        def update_row_count_limits(operations, input_id):
+            if not operations:
+                return 1000000, "Enter number of rows (1-1,000,000)"
+            
+            # Find the specific operation
+            op_id = input_id['index']
+            target_operation = None
+            for op in operations:
+                if op['id'] == op_id and op['type'] == 'tabular':
+                    target_operation = op
+                    break
+            
+            if not target_operation:
+                return 1000000, "Enter number of rows (1-1,000,000)"
+            
+            # Check if operation has GenAI Text columns
+            has_genai = any(col.get('data_type') == 'GenAI Text' for col in target_operation['config'].get('columns', []))
+            
+            if has_genai:
+                return 1000, "Enter number of rows (1-1,000) - Limited due to GenAI Text"
+            else:
+                return 1000000, "Enter number of rows (1-1,000,000)"
 
     def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
         """Create input fields for custom values and optional weights."""
@@ -1483,23 +1528,21 @@ class SyntheticDataGenerator:
                     className="mb-3"
                 ),
                 html.Label("Number of Rows:", className="form-label fw-bold"),
-                dcc.Slider(
+                dbc.Input(
                     id={'type': 'tabular-rows', 'index': op_id},
+                    type="number",
                     min=1,
-                    max=50000,
+                    max=1000000,  # Default max, will be adjusted dynamically if GenAI Text is present
                     step=1,
                     value=config.get('row_count', 1000),
-                    marks={
-                        1: '1',
-                        100: '100',
-                        1000: '1K',
-                        5000: '5K',
-                        10000: '10K',
-                        25000: '25K',
-                        50000: '50K'
-                    },
-                    tooltip={"placement": "bottom", "always_visible": True},
-                    className="mb-3"
+                    placeholder="Enter number of rows (1-1,000,000)",
+                    debounce=True,
+                    className="mb-1"
+                ),
+                html.Small(
+                    "Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present",
+                    className="text-muted mb-3 d-block",
+                    style={'fontSize': '12px'}
                 ),
                 html.Div([
                     html.Div([
