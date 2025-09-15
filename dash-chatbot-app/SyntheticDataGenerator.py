@@ -1319,8 +1319,7 @@ class SyntheticDataGenerator:
         @self.app.callback(
             [Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'value'),
              Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'max'),
-             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'placeholder'),
-             Output({'type': 'tabular-rows-help', 'index': dash.dependencies.MATCH}, 'children')],
+             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'placeholder')],
             [Input({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'value'),
              Input('operations-store', 'data')],
             State({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'id'),
@@ -1328,10 +1327,8 @@ class SyntheticDataGenerator:
         )
         def validate_and_clamp_row_count(current_value, operations, input_id):
             try:
-                default_help = "Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present"
-                
                 if not operations:
-                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)", default_help
+                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
                 
                 # Find the specific operation
                 op_id = input_id['index']
@@ -1342,21 +1339,28 @@ class SyntheticDataGenerator:
                         break
                 
                 if not target_operation:
-                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)", default_help
+                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
                 
                 # Check if operation has GenAI Text columns
                 columns = target_operation['config'].get('columns', [])
                 has_genai = any(col.get('data_type') == 'GenAI Text' for col in columns)
                 
-                # Determine max value, placeholder, and help text
+                # Debug logging to track GenAI detection
+                genai_columns = [col.get('name', 'unnamed') for col in columns if col.get('data_type') == 'GenAI Text']
+                print(f"🔍 ROW VALIDATION DEBUG: Operation {op_id}")
+                print(f"   - Total columns: {len(columns)}")
+                print(f"   - GenAI columns: {genai_columns}")
+                print(f"   - Has GenAI: {has_genai}")
+                
+                # Determine max value and placeholder
                 if has_genai:
                     max_value = 1000
                     placeholder = "Enter number of rows (1-1,000) - Limited due to GenAI Text"
-                    help_text = "⚠️ LIMIT: Maximum 1,000 rows when GenAI Text columns are present (AI processing intensive)"
                 else:
                     max_value = 1000000
                     placeholder = "Enter number of rows (1-1,000,000)"
-                    help_text = "✅ LIMIT: Maximum 1,000,000 rows (1,000 if GenAI Text columns are added)"
+                
+                print(f"   - Max value set to: {max_value:,}")
                 
                 # Clamp the current value
                 if current_value is not None:
@@ -1370,20 +1374,22 @@ class SyntheticDataGenerator:
                         print(f"🔧 ROW VALIDATION: Clamped {original_value:,} → {clamped_value:,} due to {limit_reason}")
                     else:
                         clamped_value = current_value
+                        print(f"✅ ROW VALIDATION: Value {current_value:,} is within limits (Max: {max_value:,})")
                         
-                    # Log if there are any changes
+                    # Final summary
                     if clamped_value != original_value:
-                        print(f"📊 ROW COUNT: {original_value:,} → {clamped_value:,} (GenAI: {has_genai}, Max: {max_value:,})")
+                        print(f"📊 FINAL: {original_value:,} → {clamped_value:,} (GenAI: {has_genai}, Max: {max_value:,})")
                 else:
                     clamped_value = 1000  # Default value
                     print(f"📊 ROW COUNT: Using default value 1000 (GenAI: {has_genai}, Max: {max_value:,})")
                 
-                return clamped_value, max_value, placeholder, help_text
+                return clamped_value, max_value, placeholder
                 
             except Exception as e:
                 print(f"❌ Error in row count validation: {e}")
-                default_help = "Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present"
-                return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)", default_help
+                import traceback
+                traceback.print_exc()
+                return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
 
     def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
         """Create input fields for custom values and optional weights."""
@@ -1569,8 +1575,7 @@ class SyntheticDataGenerator:
                     inputMode="numeric"  # Show numeric keypad on mobile
                 ),
                 html.Small(
-                    id={'type': 'tabular-rows-help', 'index': op_id},
-                    children="Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present",
+                    "Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present",
                     className="text-muted mb-3 d-block",
                     style={'fontSize': '12px'}
                 ),
