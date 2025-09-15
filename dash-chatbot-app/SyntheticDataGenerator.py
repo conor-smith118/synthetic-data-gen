@@ -478,6 +478,23 @@ class SyntheticDataGenerator:
                                     coords_only = bool(new_value and 'coords_only' in new_value)
                                     column['coords_only'] = coords_only
                                 
+                                # After updating any column, check if we need to clamp row count due to GenAI presence
+                                if comp_type == 'col-type':
+                                    print(f"🔍 Column type changed, checking row count limits...")
+                                    current_row_count = op['config'].get('row_count', 1000)
+                                    has_genai = any(col.get('data_type') == 'GenAI Text' for col in op['config'].get('columns', []))
+                                    max_allowed = 1000 if has_genai else 1000000
+                                    
+                                    print(f"   - Current row count: {current_row_count}")
+                                    print(f"   - Has GenAI after change: {has_genai}")
+                                    print(f"   - Max allowed: {max_allowed}")
+                                    
+                                    if current_row_count > max_allowed:
+                                        print(f"   - 🔧 AUTO-CLAMPING: {current_row_count:,} → {max_allowed:,} due to GenAI Text column")
+                                        op['config']['row_count'] = max_allowed
+                                    else:
+                                        print(f"   - ✅ Row count {current_row_count:,} is within limits")
+                                
                                 # Update configured status
                                 table_name = op['config'].get('table_name', '')
                                 op['configured'] = bool(table_name and table_name.strip() and len(op['config']['columns']) > 0)
