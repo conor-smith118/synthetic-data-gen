@@ -515,31 +515,42 @@ class SyntheticDataGenerator:
                                 # Validate and clamp row count based on GenAI Text presence
                                 print(f"🔧 MAIN CALLBACK: Processing row count change to {new_value}")
                                 
-                                if new_value is not None:
-                                    # Check if operation has GenAI Text columns
-                                    has_genai = any(col.get('data_type') == 'GenAI Text' for col in op['config'].get('columns', []))
-                                    max_allowed = 1000 if has_genai else 1000000
-                                    
-                                    print(f"   - Has GenAI: {has_genai}")
-                                    print(f"   - Max allowed: {max_allowed:,}")
-                                    print(f"   - Input value: {new_value}")
-                                    
-                                    # Clamp the value
-                                    if new_value < 1:
-                                        clamped_value = 1
-                                        print(f"   - Clamped {new_value} → {clamped_value} (minimum)")
-                                    elif new_value > max_allowed:
-                                        clamped_value = max_allowed
-                                        limit_reason = "GenAI Text columns" if has_genai else "system limits"
-                                        print(f"   - Clamped {new_value:,} → {clamped_value:,} due to {limit_reason}")
-                                    else:
-                                        clamped_value = new_value
-                                        print(f"   - Value {new_value:,} is within limits")
-                                    
-                                    op['config']['row_count'] = clamped_value
+                                if new_value is not None and str(new_value).strip() != '':
+                                    try:
+                                        # Convert to integer if it's a string
+                                        if isinstance(new_value, str):
+                                            new_value = int(new_value)
+                                        
+                                        # Check if operation has GenAI Text columns
+                                        has_genai = any(col.get('data_type') == 'GenAI Text' for col in op['config'].get('columns', []))
+                                        max_allowed = 1000 if has_genai else 1000000
+                                        
+                                        print(f"   - Has GenAI: {has_genai}")
+                                        print(f"   - Max allowed: {max_allowed:,}")
+                                        print(f"   - Input value: {new_value}")
+                                        
+                                        # Clamp the value
+                                        if new_value < 1:
+                                            clamped_value = 1
+                                            print(f"   - Clamped {new_value} → {clamped_value} (minimum)")
+                                        elif new_value > max_allowed:
+                                            clamped_value = max_allowed
+                                            limit_reason = "GenAI Text columns" if has_genai else "system limits"
+                                            print(f"   - Clamped {new_value:,} → {clamped_value:,} due to {limit_reason}")
+                                        else:
+                                            clamped_value = new_value
+                                            print(f"   - Value {new_value:,} is within limits")
+                                        
+                                        op['config']['row_count'] = clamped_value
+                                        
+                                    except (ValueError, TypeError) as e:
+                                        print(f"   - Invalid value '{new_value}', keeping current: {op['config'].get('row_count', 1000)}")
+                                        # Don't change the stored value for invalid inputs
                                 else:
-                                    op['config']['row_count'] = 1000  # Default
-                                    print("   - Using default value 1000")
+                                    # For None or empty values during typing, don't change stored value
+                                    current_stored = op['config'].get('row_count', 1000)
+                                    print(f"   - None/empty value received, keeping current: {current_stored}")
+                                    # Don't update the stored value
                             
                             # Mark as configured based on operation type
                             if op['type'] == 'tabular':
@@ -1521,7 +1532,7 @@ class SyntheticDataGenerator:
                     step=1,
                     value=config.get('row_count', 1000),
                     placeholder="Enter number of rows (1-1,000,000)",
-                    debounce=False,  # Remove debounce to get immediate value updates
+                    debounce=True,  # Add debounce back for smooth typing experience
                     className="mb-1",
                     # Add input validation attributes
                     pattern="[0-9]*",  # Only allow numbers
