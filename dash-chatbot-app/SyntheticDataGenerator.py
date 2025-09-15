@@ -512,21 +512,8 @@ class SyntheticDataGenerator:
                             elif comp_type == 'tabular-name':
                                 op['config']['table_name'] = new_value
                             elif comp_type == 'tabular-rows':
-                                # Validate row count based on GenAI Text presence
-                                validated_value = new_value
-                                if validated_value is not None:
-                                    # Check if operation has GenAI Text columns
-                                    has_genai = any(col.get('data_type') == 'GenAI Text' for col in op['config'].get('columns', []))
-                                    max_allowed = 1000 if has_genai else 1000000
-                                    
-                                    # Ensure value is within bounds
-                                    if validated_value < 1:
-                                        validated_value = 1
-                                    elif validated_value > max_allowed:
-                                        validated_value = max_allowed
-                                        print(f"⚠️  Row count limited to {max_allowed:,} due to {'GenAI Text columns' if has_genai else 'system limits'}")
-                                
-                                op['config']['row_count'] = validated_value
+                                # Store the row count (validation/clamping handled by separate callback)
+                                op['config']['row_count'] = new_value
                             
                             # Mark as configured based on operation type
                             if op['type'] == 'tabular':
@@ -1328,36 +1315,75 @@ class SyntheticDataGenerator:
                 print(f"Error removing custom value: {str(e)}")
                 return dash.no_update
         
-        # Dynamic row count validation callback
+        # Dynamic row count validation and clamping callback
         @self.app.callback(
-            [Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'max'),
-             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'placeholder')],
-            Input('operations-store', 'data'),
+            [Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'value'),
+             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'max'),
+             Output({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'placeholder'),
+             Output({'type': 'tabular-rows-help', 'index': dash.dependencies.MATCH}, 'children')],
+            [Input({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'value'),
+             Input('operations-store', 'data')],
             State({'type': 'tabular-rows', 'index': dash.dependencies.MATCH}, 'id'),
             prevent_initial_call=True
         )
-        def update_row_count_limits(operations, input_id):
-            if not operations:
-                return 1000000, "Enter number of rows (1-1,000,000)"
-            
-            # Find the specific operation
-            op_id = input_id['index']
-            target_operation = None
-            for op in operations:
-                if op['id'] == op_id and op['type'] == 'tabular':
-                    target_operation = op
-                    break
-            
-            if not target_operation:
-                return 1000000, "Enter number of rows (1-1,000,000)"
-            
-            # Check if operation has GenAI Text columns
-            has_genai = any(col.get('data_type') == 'GenAI Text' for col in target_operation['config'].get('columns', []))
-            
-            if has_genai:
-                return 1000, "Enter number of rows (1-1,000) - Limited due to GenAI Text"
-            else:
-                return 1000000, "Enter number of rows (1-1,000,000)"
+        def validate_and_clamp_row_count(current_value, operations, input_id):
+            try:
+                default_help = "Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present"
+                
+                if not operations:
+                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)", default_help
+                
+                # Find the specific operation
+                op_id = input_id['index']
+                target_operation = None
+                for op in operations:
+                    if op['id'] == op_id and op['type'] == 'tabular':
+                        target_operation = op
+                        break
+                
+                if not target_operation:
+                    return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)", default_help
+                
+                # Check if operation has GenAI Text columns
+                columns = target_operation['config'].get('columns', [])
+                has_genai = any(col.get('data_type') == 'GenAI Text' for col in columns)
+                
+                # Determine max value, placeholder, and help text
+                if has_genai:
+                    max_value = 1000
+                    placeholder = "Enter number of rows (1-1,000) - Limited due to GenAI Text"
+                    help_text = "⚠️ LIMIT: Maximum 1,000 rows when GenAI Text columns are present (AI processing intensive)"
+                else:
+                    max_value = 1000000
+                    placeholder = "Enter number of rows (1-1,000,000)"
+                    help_text = "✅ LIMIT: Maximum 1,000,000 rows (1,000 if GenAI Text columns are added)"
+                
+                # Clamp the current value
+                if current_value is not None:
+                    original_value = current_value
+                    if current_value < 1:
+                        clamped_value = 1
+                        print(f"🔧 ROW VALIDATION: Clamped {original_value} → {clamped_value} (minimum)")
+                    elif current_value > max_value:
+                        clamped_value = max_value
+                        limit_reason = "GenAI Text columns" if has_genai else "system limits"
+                        print(f"🔧 ROW VALIDATION: Clamped {original_value:,} → {clamped_value:,} due to {limit_reason}")
+                    else:
+                        clamped_value = current_value
+                        
+                    # Log if there are any changes
+                    if clamped_value != original_value:
+                        print(f"📊 ROW COUNT: {original_value:,} → {clamped_value:,} (GenAI: {has_genai}, Max: {max_value:,})")
+                else:
+                    clamped_value = 1000  # Default value
+                    print(f"📊 ROW COUNT: Using default value 1000 (GenAI: {has_genai}, Max: {max_value:,})")
+                
+                return clamped_value, max_value, placeholder, help_text
+                
+            except Exception as e:
+                print(f"❌ Error in row count validation: {e}")
+                default_help = "Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present"
+                return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)", default_help
 
     def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
         """Create input fields for custom values and optional weights."""
@@ -1532,15 +1558,19 @@ class SyntheticDataGenerator:
                     id={'type': 'tabular-rows', 'index': op_id},
                     type="number",
                     min=1,
-                    max=1000000,  # Default max, will be adjusted dynamically if GenAI Text is present
+                    max=1000000,  # Will be dynamically updated by validation callback
                     step=1,
                     value=config.get('row_count', 1000),
                     placeholder="Enter number of rows (1-1,000,000)",
                     debounce=True,
-                    className="mb-1"
+                    className="mb-1",
+                    # Add input validation attributes
+                    pattern="[0-9]*",  # Only allow numbers
+                    inputMode="numeric"  # Show numeric keypad on mobile
                 ),
                 html.Small(
-                    "Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present",
+                    id={'type': 'tabular-rows-help', 'index': op_id},
+                    children="Maximum 1,000,000 rows normally, 1,000 rows if GenAI Text columns are present",
                     className="text-muted mb-3 d-block",
                     style={'fontSize': '12px'}
                 ),
