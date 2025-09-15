@@ -1327,11 +1327,15 @@ class SyntheticDataGenerator:
         )
         def validate_and_clamp_row_count(current_value, operations, input_id):
             try:
+                print(f"🚀 CALLBACK TRIGGERED: current_value={current_value}, type={type(current_value)}")
+                
                 if not operations:
+                    print("   - No operations found, using defaults")
                     return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
                 
                 # Find the specific operation
                 op_id = input_id['index']
+                print(f"   - Looking for operation: {op_id}")
                 target_operation = None
                 for op in operations:
                     if op['id'] == op_id and op['type'] == 'tabular':
@@ -1339,6 +1343,7 @@ class SyntheticDataGenerator:
                         break
                 
                 if not target_operation:
+                    print(f"   - Operation {op_id} not found, using defaults")
                     return current_value or 1000, 1000000, "Enter number of rows (1-1,000,000)"
                 
                 # Check if operation has GenAI Text columns with extensive debugging
@@ -1579,7 +1584,7 @@ class SyntheticDataGenerator:
                     step=1,
                     value=config.get('row_count', 1000),
                     placeholder="Enter number of rows (1-1,000,000)",
-                    debounce=True,
+                    debounce=False,  # Remove debounce to get immediate value updates
                     className="mb-1",
                     # Add input validation attributes
                     pattern="[0-9]*",  # Only allow numbers
