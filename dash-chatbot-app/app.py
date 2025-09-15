@@ -162,6 +162,7 @@ else:
                 dcc.Store(id="progress-store"),
                 dcc.Store(id="history-store", data=[]),
                 dcc.Store(id="operations-store", data=[]),
+                dcc.Download(id="download-files-component"),
                 dcc.Interval(
                     id="progress-interval",
                     interval=500,  # Update every 500ms

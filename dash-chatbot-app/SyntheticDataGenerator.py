@@ -279,9 +279,25 @@ class SyntheticDataGenerator:
                     total_items = len(self.generation_state.get('completed_items', []))
                     
                     success_message = dbc.Alert([
-                        html.H5("✅ Batch Generation Complete!", className="mb-2"),
-                        html.P(f"Successfully generated {total_items} item(s) from {self.generation_state.get('total_operations', 0)} operation(s) in {elapsed_time:.1f} seconds"),
-                        html.P("You can add more operations above or generate the current batch again!", className="mb-0 text-muted")
+                        dbc.Row([
+                            dbc.Col([
+                                html.H5("✅ Batch Generation Complete!", className="mb-2"),
+                                html.P(f"Successfully generated {total_items} item(s) from {self.generation_state.get('total_operations', 0)} operation(s) in {elapsed_time:.1f} seconds"),
+                                html.P("You can add more operations above or generate the current batch again!", className="mb-0 text-muted")
+                            ], width=8),
+                            dbc.Col([
+                                dbc.Button([
+                                    html.I(className="fas fa-download me-2"),
+                                    "Download All Files"
+                                ], 
+                                id="download-all-files-btn",
+                                color="primary", 
+                                size="lg",
+                                className="w-100",
+                                disabled=False,
+                                title="Download all files generated in this batch as a ZIP file")
+                            ], width=4)
+                        ])
                     ], color="success")
                     
                     return success_message, True, False, {'status': 'complete', 'items': self.generation_state.get('completed_items', [])}
@@ -304,7 +320,7 @@ class SyntheticDataGenerator:
                     html.Div([
                         html.H3(f"{int(time_remaining // 60)}:{int(time_remaining % 60):02d}", 
                                className="countdown-timer text-center mb-1"),
-                        html.P("Time Remaining", className="text-center mb-0 small text-muted")
+                        html.P("Estimated Time Remaining", className="text-center mb-0 small text-muted")
                     ], className="mb-2")
                 ])
             ], color="info")
@@ -1421,6 +1437,32 @@ class SyntheticDataGenerator:
                 print(f"Error removing custom value: {str(e)}")
                 return dash.no_update
         
+        # Download all files callback - only includes files from current batch generation
+        @self.app.callback(
+            Output('download-files-component', 'data'),
+            Input('download-all-files-btn', 'n_clicks'),
+            prevent_initial_call=True
+        )
+        def download_all_files(n_clicks):
+            if not n_clicks:
+                return dash.no_update
+            
+            # Create timestamp for zip filename
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            # Create zip file with files from current batch generation only
+            # (completed_items is reset at start of each batch)
+            zip_info = self._download_and_zip_files(timestamp)
+            
+            if zip_info and zip_info['local_path']:
+                print(f"📦 Zip created successfully: {zip_info['filename']} ({zip_info['file_count']} files)")
+                
+                # Return file for download
+                return dcc.send_file(zip_info['local_path'], filename=zip_info['filename'])
+            else:
+                print("❌ Failed to create zip file")
+                return dash.no_update
+
         # NOTE: Row count validation is now handled directly in the main operations callback above
         # to avoid race conditions between multiple callbacks
 
@@ -3169,6 +3211,110 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             print(f"   Source: {local_path}")
             print(f"   Target: {self.volume_path}/{filename}")
             return False
+
+    def _list_volume_files(self):
+        """List all files in the volume."""
+        import io
+        from databricks.sdk import WorkspaceClient
+        
+        try:
+            w = WorkspaceClient()
+            
+            # List all files in the volume
+            print(f"📋 Listing files in volume: {self.volume_path}")
+            files = w.files.list_directory_contents(self.volume_path)
+            
+            file_list = []
+            for file_info in files:
+                if not file_info.is_directory:
+                    file_list.append({
+                        'name': file_info.name,
+                        'path': file_info.path,
+                        'size': file_info.file_size
+                    })
+                    
+            print(f"📁 Found {len(file_list)} file(s) in volume")
+            return file_list
+            
+        except ImportError as e:
+            print(f"❌ ERROR: Databricks SDK not available - {str(e)}")
+            return []
+        except Exception as e:
+            print(f"❌ ERROR: Failed to list volume files - {str(e)}")
+            return []
+
+    def _download_and_zip_files(self, timestamp):
+        """Download all files from volume and create a zip file."""
+        import zipfile
+        import os
+        import io
+        import tempfile
+        from databricks.sdk import WorkspaceClient
+        
+        try:
+            w = WorkspaceClient()
+            
+            # Get list of completed files from generation state
+            completed_items = self.generation_state.get('completed_items', [])
+            filenames = []
+            
+            # Extract filenames from completed items
+            for item in completed_items:
+                if isinstance(item, dict) and 'filename' in item:
+                    filenames.append(item['filename'])
+                elif isinstance(item, list):
+                    # Handle batch operations that return lists
+                    for sub_item in item:
+                        if isinstance(sub_item, dict) and 'filename' in sub_item:
+                            filenames.append(sub_item['filename'])
+            
+            if not filenames:
+                print("⚠️  No files found to zip from current batch generation")
+                return None
+            
+            # Create zip file locally first  
+            zip_filename = f"synthetic_data_batch_{timestamp}.zip"
+            temp_zip_path = f"./generated_documents/{zip_filename}"
+            os.makedirs('./generated_documents', exist_ok=True)
+            
+            print(f"📦 Creating zip file with {len(filenames)} file(s) from CURRENT BATCH only:")
+            for filename in filenames:
+                print(f"   • {filename}")
+            
+            with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for filename in filenames:
+                    try:
+                        # Download file from volume
+                        volume_file_path = f"{self.volume_path}/{filename}"
+                        print(f"   Downloading: {filename}")
+                        
+                        # Use Databricks SDK to download file
+                        file_content = w.files.download(volume_file_path)
+                        
+                        # Add to zip
+                        zipf.writestr(filename, file_content.contents)
+                        print(f"   ✅ Added {filename} to zip")
+                        
+                    except Exception as file_error:
+                        print(f"   ⚠️  Skipped {filename}: {str(file_error)}")
+                        continue
+            
+            # Save zip to volume as well
+            zip_saved_to_volume = self._save_to_volume(temp_zip_path, zip_filename)
+            
+            return {
+                'local_path': temp_zip_path,
+                'filename': zip_filename,
+                'saved_to_volume': zip_saved_to_volume,
+                'file_count': len(filenames)
+            }
+            
+        except ImportError as e:
+            print(f"❌ ERROR: Databricks SDK not available - {str(e)}")
+            return None
+        except Exception as e:
+            print(f"❌ ERROR: Failed to create zip file - {str(e)}")
+            return None
 
     def _format_doc_type(self, doc_type):
         """Format document type for display."""
