@@ -30,11 +30,52 @@ class SyntheticDataGenerator:
             'current_step': '',
             'completed_files': [],
             'error': None,
-            'start_time': None
+            'start_time': None,
+            'estimated_total_time': 0
         }
         
         self._create_callbacks()
         self._add_custom_css()
+
+    def _estimate_total_time(self, operations):
+        """Calculate estimated total time for all operations based on type and configuration."""
+        total_time = 0
+        
+        for operation in operations:
+            op_type = operation.get('type', '')
+            config = operation.get('config', {})
+            
+            if op_type == 'pdf':
+                # PDF operations
+                count = config.get('count', 1)
+                include_images = config.get('include_images', False)
+                if include_images:
+                    total_time += count * 35  # 35 seconds per PDF with images
+                else:
+                    total_time += count * 13  # 13 seconds per PDF without images
+                    
+            elif op_type == 'text':
+                # Text operations (treat similar to PDF without images)
+                count = config.get('count', 1)
+                total_time += count * 13  # 13 seconds per text document
+                
+            elif op_type == 'tabular':
+                # Tabular operations
+                row_count = config.get('row_count', 1000)
+                columns = config.get('columns', [])
+                
+                # Check if any column is GenAI Text
+                has_genai = any(col.get('data_type') == 'GenAI Text' for col in columns)
+                
+                if has_genai:
+                    if row_count <= 500:
+                        total_time += 22  # 22 seconds for GenAI ≤ 500 rows
+                    else:
+                        total_time += 52  # 52 seconds for GenAI > 500 rows
+                else:
+                    total_time += 21  # 21 seconds for tabular without GenAI
+        
+        return total_time
 
     def _parse_column_references(self, prompt_text):
         """Extract column names referenced in the prompt using <Column Name> syntax."""
@@ -176,6 +217,9 @@ class SyntheticDataGenerator:
             if not configured_ops:
                 return dash.no_update, dash.no_update, dash.no_update
             
+            # Calculate estimated total time for countdown
+            estimated_time = self._estimate_total_time(configured_ops)
+            
             # Reset and start generation state
             self.generation_state = {
                 'active': True,
@@ -185,6 +229,7 @@ class SyntheticDataGenerator:
                 'completed_items': [],
                 'error': None,
                 'start_time': time.time(),
+                'estimated_total_time': estimated_time,
                 'operations': configured_ops,
                 'company_name': company_name or 'Acme Solutions Inc.',
                 'company_sector': company_sector or 'technology'
@@ -213,10 +258,11 @@ class SyntheticDataGenerator:
             if not self.generation_state.get('active', False) and self.generation_state.get('current_operation', 0) == 0:
                 return dash.no_update, dash.no_update, dash.no_update, dash.no_update
             
-            # Calculate progress
-            progress_percent = 0
-            if self.generation_state.get('total_operations', 0) > 0:
-                progress_percent = (self.generation_state.get('current_operation', 0) / self.generation_state.get('total_operations', 1)) * 100
+            # Calculate time remaining for countdown
+            start_time = self.generation_state.get('start_time', time.time())
+            estimated_time = self.generation_state.get('estimated_total_time', 0)
+            elapsed_time = time.time() - start_time
+            time_remaining = max(0, estimated_time - elapsed_time)
             
             # Check if generation is complete
             if not self.generation_state.get('active', False):
@@ -254,17 +300,16 @@ class SyntheticDataGenerator:
                     html.P(f"Operation {current_op} of {total_ops}", className="mb-2"),
                     html.P(f"Current step: {self.generation_state.get('current_step', 'Processing...')}", className="mb-3 text-muted"),
                     
-                    dbc.Progress(
-                        value=progress_percent,
-                        striped=True,
-                        animated=True,
-                        className="mb-2"
-                    ),
-                    html.P(f"{progress_percent:.0f}% Complete", className="mb-0 text-center small")
+                    # Countdown timer display
+                    html.Div([
+                        html.H3(f"{int(time_remaining // 60)}:{int(time_remaining % 60):02d}", 
+                               className="countdown-timer text-center mb-1"),
+                        html.P("Time Remaining", className="text-center mb-0 small text-muted")
+                    ], className="mb-2")
                 ])
             ], color="info")
             
-            return status_message, False, True, {'status': 'generating', 'progress': progress_percent}
+            return status_message, False, True, {'status': 'generating', 'time_remaining': time_remaining, 'elapsed_time': elapsed_time}
         
         # History update callback
         @self.app.callback(
@@ -3390,13 +3435,12 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             font-weight: 600;
         }
         
-        .progress {
-            height: 8px;
-            border-radius: 4px;
-        }
-        
-        .progress-bar {
-            background: linear-gradient(90deg, #17a2b8, #28a745);
+        /* Countdown timer styles */
+        .countdown-timer {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #007bff;
+            font-size: 2rem;
         }
         '''
         
