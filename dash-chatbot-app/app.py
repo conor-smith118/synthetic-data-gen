@@ -18,7 +18,7 @@ assert serving_endpoint, \
 endpoint_supported = is_endpoint_supported(serving_endpoint)
 
 # Initialize the Dash app with a clean theme
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY], suppress_callback_exceptions=True)
 
 # Define the app layout based on endpoint support
 if not endpoint_supported:
