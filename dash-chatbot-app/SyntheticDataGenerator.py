@@ -295,7 +295,7 @@ class SyntheticDataGenerator:
                                 size="lg",
                                 className="w-100",
                                 disabled=False,
-                                title="Download all files generated in this batch as a ZIP file")
+                                title="Download all files generated in this batch as a ZIP file (downloads from volume to local directory first, then creates ZIP)")
                             ], width=4)
                         ])
                     ], color="success")
@@ -1447,20 +1447,30 @@ class SyntheticDataGenerator:
             if not n_clicks:
                 return dash.no_update
             
-            # Create timestamp for zip filename
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # Create zip file with files from current batch generation only
-            # (completed_items is reset at start of each batch)
-            zip_info = self._download_and_zip_files(timestamp)
-            
-            if zip_info and zip_info['local_path']:
-                print(f"📦 Zip created successfully: {zip_info['filename']} ({zip_info['file_count']} files)")
+            try:
+                print(f"🔽 Download button clicked, starting zip creation...")
                 
-                # Return file for download
-                return dcc.send_file(zip_info['local_path'], filename=zip_info['filename'])
-            else:
-                print("❌ Failed to create zip file")
+                # Create timestamp for zip filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
+                # Create zip file with files from current batch generation only
+                # (completed_items is reset at start of each batch)
+                # Smart approach: download missing files to local first, then zip locally
+                zip_info = self._create_zip_from_local_files(timestamp)
+                
+                if zip_info and zip_info['local_path']:
+                    print(f"📦 Zip created successfully: {zip_info['filename']} ({zip_info['file_count']} files)")
+                    
+                    # Return file for download
+                    return dcc.send_file(zip_info['local_path'], filename=zip_info['filename'])
+                else:
+                    print("❌ Failed to create zip file")
+                    return dash.no_update
+                    
+            except Exception as e:
+                print(f"❌ ERROR in download callback: {str(e)}")
+                import traceback
+                print(f"Full traceback: {traceback.format_exc()}")
                 return dash.no_update
 
         # NOTE: Row count validation is now handled directly in the main operations callback above
@@ -3243,16 +3253,14 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             print(f"❌ ERROR: Failed to list volume files - {str(e)}")
             return []
 
-    def _download_and_zip_files(self, timestamp):
-        """Download all files from volume and create a zip file."""
+    def _create_zip_from_local_files(self, timestamp):
+        """Download missing files to local, then create zip from local files."""
         import zipfile
         import os
-        import io
-        import tempfile
         from databricks.sdk import WorkspaceClient
         
         try:
-            w = WorkspaceClient()
+            print(f"⚡ Smart download approach: ensure all files are local first...")
             
             # Get list of completed files from generation state
             completed_items = self.generation_state.get('completed_items', [])
@@ -3263,10 +3271,139 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
                 if isinstance(item, dict) and 'filename' in item:
                     filenames.append(item['filename'])
                 elif isinstance(item, list):
-                    # Handle batch operations that return lists
                     for sub_item in item:
                         if isinstance(sub_item, dict) and 'filename' in sub_item:
                             filenames.append(sub_item['filename'])
+            
+            if not filenames:
+                print("⚠️  No files found from current batch")
+                return None
+            
+            # Ensure local directory exists
+            local_dir = "./generated_documents"
+            os.makedirs(local_dir, exist_ok=True)
+            
+            print(f"📋 Processing {len(filenames)} file(s) for download...")
+            
+            # Check which files exist locally and which need downloading
+            available_files = []
+            files_to_download = []
+            
+            for filename in filenames:
+                local_path = os.path.join(local_dir, filename)
+                if os.path.exists(local_path):
+                    file_size = os.path.getsize(local_path)
+                    available_files.append((filename, local_path, file_size))
+                    print(f"   ✅ Already local: {filename} ({file_size:,} bytes)")
+                else:
+                    files_to_download.append(filename)
+                    print(f"   📥 Need to download: {filename}")
+            
+            # Download missing files from volume
+            if files_to_download:
+                print(f"📡 Downloading {len(files_to_download)} file(s) from volume...")
+                
+                try:
+                    w = WorkspaceClient()
+                    
+                    for i, filename in enumerate(files_to_download):
+                        try:
+                            print(f"   📥 [{i+1}/{len(files_to_download)}] Downloading: {filename}")
+                            
+                            # Download from volume using the pattern you provided
+                            download_file_path = f"{self.volume_path}/{filename}"
+                            response = w.files.download(download_file_path)
+                            file_data = response.contents
+                            
+                            # Save to local directory
+                            local_path = os.path.join(local_dir, filename)
+                            with open(local_path, 'wb') as f:
+                                f.write(file_data)
+                            
+                            file_size = len(file_data)
+                            available_files.append((filename, local_path, file_size))
+                            print(f"      ✅ Downloaded and saved locally: {file_size:,} bytes")
+                            
+                        except Exception as download_error:
+                            print(f"      ❌ Failed to download {filename}: {str(download_error)}")
+                            continue
+                            
+                except Exception as sdk_error:
+                    print(f"❌ ERROR: Databricks SDK issue - {str(sdk_error)}")
+                    if not available_files:
+                        return None
+            
+            if not available_files:
+                print("❌ No files available for zipping")
+                return None
+            
+            # Create zip from all local files
+            zip_filename = f"synthetic_data_batch_{timestamp}.zip"
+            temp_zip_path = os.path.join(local_dir, zip_filename)
+            
+            print(f"📦 Creating zip from {len(available_files)} local file(s)...")
+            
+            successful_files = 0
+            with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for filename, local_path, file_size in available_files:
+                    try:
+                        zipf.write(local_path, filename)
+                        successful_files += 1
+                        print(f"   ✅ Added to zip: {filename} ({file_size:,} bytes)")
+                    except Exception as zip_error:
+                        print(f"   ❌ Failed to add {filename}: {str(zip_error)}")
+            
+            if successful_files == 0:
+                print("❌ No files were successfully added to zip")
+                return None
+            
+            # Check final zip size
+            zip_size = os.path.getsize(temp_zip_path) if os.path.exists(temp_zip_path) else 0
+            print(f"🎯 Zip created successfully: {zip_size:,} bytes with {successful_files} files")
+            
+            return {
+                'local_path': temp_zip_path,
+                'filename': zip_filename,
+                'saved_to_volume': False,  # Skip volume save for speed
+                'file_count': successful_files
+            }
+            
+        except Exception as e:
+            print(f"❌ ERROR in smart download zip creation: {str(e)}")
+            import traceback
+            print(f"Full traceback: {traceback.format_exc()}")
+            return None
+
+    def _download_and_zip_files(self, timestamp):
+        """Download all files from volume and create a zip file."""
+        import zipfile
+        import os
+        import io
+        import tempfile
+        from databricks.sdk import WorkspaceClient
+        
+        try:
+            print(f"🏁 Starting zip creation process...")
+            w = WorkspaceClient()
+            
+            # Get list of completed files from generation state
+            completed_items = self.generation_state.get('completed_items', [])
+            filenames = []
+            
+            print(f"🔍 Analyzing completed items: {len(completed_items)} total")
+            
+            # Extract filenames from completed items
+            for i, item in enumerate(completed_items):
+                print(f"   Item {i+1}: {type(item)} - {item if isinstance(item, str) else 'dict/list'}")
+                if isinstance(item, dict) and 'filename' in item:
+                    filenames.append(item['filename'])
+                    print(f"     → Found filename: {item['filename']}")
+                elif isinstance(item, list):
+                    # Handle batch operations that return lists
+                    for j, sub_item in enumerate(item):
+                        if isinstance(sub_item, dict) and 'filename' in sub_item:
+                            filenames.append(sub_item['filename'])
+                            print(f"     → Found filename in subitem {j+1}: {sub_item['filename']}")
             
             if not filenames:
                 print("⚠️  No files found to zip from current batch generation")
@@ -3277,36 +3414,56 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             temp_zip_path = f"./generated_documents/{zip_filename}"
             os.makedirs('./generated_documents', exist_ok=True)
             
-            print(f"📦 Creating zip file with {len(filenames)} file(s) from CURRENT BATCH only:")
+            print(f"📦 Creating zip file: {zip_filename}")
+            print(f"   Files to include ({len(filenames)}):")
             for filename in filenames:
-                print(f"   • {filename}")
+                print(f"     • {filename}")
+            
+            successful_files = 0
             
             with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for filename in filenames:
+                for i, filename in enumerate(filenames):
                     try:
+                        print(f"   📥 [{i+1}/{len(filenames)}] Processing: {filename}")
+                        
                         # Download file from volume
                         volume_file_path = f"{self.volume_path}/{filename}"
-                        print(f"   Downloading: {filename}")
+                        print(f"      Volume path: {volume_file_path}")
                         
                         # Use Databricks SDK to download file
+                        print(f"      Downloading from volume...")
                         file_content = w.files.download(volume_file_path)
+                        
+                        print(f"      Downloaded {len(file_content.contents):,} bytes")
                         
                         # Add to zip
                         zipf.writestr(filename, file_content.contents)
-                        print(f"   ✅ Added {filename} to zip")
+                        successful_files += 1
+                        print(f"      ✅ Added to zip successfully")
                         
                     except Exception as file_error:
-                        print(f"   ⚠️  Skipped {filename}: {str(file_error)}")
+                        print(f"      ❌ Failed to process {filename}: {str(file_error)}")
                         continue
             
-            # Save zip to volume as well
-            zip_saved_to_volume = self._save_to_volume(temp_zip_path, zip_filename)
+            print(f"🎯 Zip creation complete: {successful_files}/{len(filenames)} files added successfully")
+            
+            if successful_files == 0:
+                print("❌ No files were successfully added to zip")
+                return None
+            
+            # Check zip file size
+            zip_size = os.path.getsize(temp_zip_path) if os.path.exists(temp_zip_path) else 0
+            print(f"📊 Created zip file: {zip_size:,} bytes")
+            
+            # Skip saving zip to volume to avoid timeouts
+            print(f"⚡ Skipping volume save for faster download...")
+            zip_saved_to_volume = False
             
             return {
                 'local_path': temp_zip_path,
                 'filename': zip_filename,
                 'saved_to_volume': zip_saved_to_volume,
-                'file_count': len(filenames)
+                'file_count': successful_files
             }
             
         except ImportError as e:
@@ -3314,6 +3471,8 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             return None
         except Exception as e:
             print(f"❌ ERROR: Failed to create zip file - {str(e)}")
+            import traceback
+            print(f"Full traceback: {traceback.format_exc()}")
             return None
 
     def _format_doc_type(self, doc_type):
