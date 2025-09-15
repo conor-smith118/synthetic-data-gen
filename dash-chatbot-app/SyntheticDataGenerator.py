@@ -3310,10 +3310,26 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
                         try:
                             print(f"   📥 [{i+1}/{len(files_to_download)}] Downloading: {filename}")
                             
-                            # Download from volume using the pattern you provided
+                            # Download from volume using Databricks SDK
                             download_file_path = f"{self.volume_path}/{filename}"
+                            print(f"      Volume path: {download_file_path}")
+                            
                             response = w.files.download(download_file_path)
-                            file_data = response.contents
+                            
+                            # Handle StreamingResponse properly
+                            if hasattr(response, 'contents'):
+                                # Try reading from contents if it's a stream
+                                if hasattr(response.contents, 'read'):
+                                    file_data = response.contents.read()
+                                else:
+                                    file_data = response.contents
+                            else:
+                                # Fallback: try to read response directly
+                                file_data = response.read() if hasattr(response, 'read') else response
+                            
+                            print(f"      Response type: {type(response)}")
+                            print(f"      Contents type: {type(response.contents) if hasattr(response, 'contents') else 'No contents attr'}")
+                            print(f"      File data type: {type(file_data)}")
                             
                             # Save to local directory
                             local_path = os.path.join(local_dir, filename)
