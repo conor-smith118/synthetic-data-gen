@@ -1563,6 +1563,7 @@ class SyntheticDataGenerator:
                     id={'type': 'pdf-doc-name', 'index': op_id},
                     placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
                     value=config.get('doc_name', ''),
+                    debounce=True,
                     className="mb-3"
                 ),
                 html.Label("Document Type:", className="form-label fw-bold"),
@@ -1617,6 +1618,7 @@ class SyntheticDataGenerator:
                     id={'type': 'text-doc-name', 'index': op_id},
                     placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
                     value=config.get('doc_name', ''),
+                    debounce=True,
                     className="mb-3"
                 ),
                 html.Label("Document Type:", className="form-label fw-bold"),
