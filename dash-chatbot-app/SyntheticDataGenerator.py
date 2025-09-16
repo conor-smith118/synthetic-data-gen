@@ -394,6 +394,7 @@ class SyntheticDataGenerator:
              Input({'type': 'text-format', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-count', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'tabular-name', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'tabular-unity', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'tabular-rows', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-name', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
              Input({'type': 'col-type', 'op': dash.dependencies.ALL, 'col': dash.dependencies.ALL}, 'value'),
@@ -595,6 +596,8 @@ class SyntheticDataGenerator:
                                 op['config']['count'] = new_value
                             elif comp_type == 'tabular-name':
                                 op['config']['table_name'] = new_value
+                            elif comp_type == 'tabular-unity':
+                                op['config']['write_to_unity'] = 'write_to_unity' in (new_value or [])
                             elif comp_type == 'tabular-rows':
                                 # Validate and clamp row count based on GenAI Text presence
                                 print(f"🔧 MAIN CALLBACK: Processing row count change")
@@ -1666,13 +1669,24 @@ class SyntheticDataGenerator:
         elif op_type == 'tabular':
             config_inputs = [
                 html.Label("Table Name:", className="form-label fw-bold"),
-                dbc.Input(
-                    id={'type': 'tabular-name', 'index': op_id},
-                    placeholder="Enter table name...",
-                    value=config.get('table_name', ''),
-                    debounce=True,
-                    className="mb-3"
-                ),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Input(
+                            id={'type': 'tabular-name', 'index': op_id},
+                            placeholder="Enter table name...",
+                            value=config.get('table_name', ''),
+                            debounce=True
+                        ),
+                    ], width=8),
+                    dbc.Col([
+                        dbc.Checklist(
+                            options=[{"label": "Write to Unity Catalog", "value": "write_to_unity"}],
+                            value=["write_to_unity"] if config.get('write_to_unity', False) else [],
+                            id={'type': 'tabular-unity', 'index': op_id},
+                            className="mt-1"
+                        )
+                    ], width=4)
+                ], className="mb-3"),
                 html.Label("Number of Rows:", className="form-label fw-bold"),
                 dbc.Input(
                     id={'type': 'tabular-rows', 'index': op_id},
@@ -2118,6 +2132,7 @@ class SyntheticDataGenerator:
         table_name = config.get('table_name', 'sample_table')
         row_count = config.get('row_count', 1000)
         columns = config.get('columns', [])
+        write_to_unity = config.get('write_to_unity', False)
         
         if not columns:
             # If no columns configured, skip this operation
@@ -2125,7 +2140,7 @@ class SyntheticDataGenerator:
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        return self._generate_tabular_item(table_name, row_count, columns, company_name, company_sector, timestamp)
+        return self._generate_tabular_item(table_name, row_count, columns, company_name, company_sector, timestamp, write_to_unity)
 
     def _generate_documents_background(self, doc_type, description, count, doc_name=''):
         """Generate documents in background thread with progress updates."""
@@ -3879,7 +3894,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
                 item_info = self._generate_text_item(description, company_name, company_sector, timestamp)
             elif data_type == 'tabular':
                 # Generate tabular data
-                item_info = self._generate_tabular_item(description, company_name, company_sector, timestamp)
+                item_info = self._generate_tabular_item('sample_table', 1000, [], company_name, company_sector, timestamp, False)
             else:
                 raise Exception(f"Unknown data type: {data_type}")
             
@@ -4049,7 +4064,7 @@ Please incorporate this company information naturally throughout the document to
                 'size': 0
             }
 
-    def _generate_tabular_item(self, table_name, row_count, columns, company_name, company_sector, timestamp):
+    def _generate_tabular_item(self, table_name, row_count, columns, company_name, company_sector, timestamp, write_to_unity=False):
         """Generate tabular data using Databricks job on remote cluster."""
         try:
             self.generation_state['current_step'] = f"Starting Databricks job for {row_count} rows of tabular data..."
@@ -4070,6 +4085,12 @@ Please incorporate this company information naturally throughout the document to
             job_id = "635184344270819"
             
             # Prepare parameters for the job
+            # Sanitize table name for Unity Catalog (replace illegal characters with underscores)
+            sanitized_table_name = "".join(c if c.isalnum() or c == '_' else '_' for c in table_name)
+            sanitized_table_name = sanitized_table_name.strip('_')  # Remove leading/trailing underscores
+            if not sanitized_table_name:
+                sanitized_table_name = f"table_{timestamp}"
+                
             job_parameters = {
                 "table_name": table_name,
                 "row_count": str(row_count),
@@ -4078,7 +4099,10 @@ Please incorporate this company information naturally throughout the document to
                 "company_sector": company_sector,
                 "timestamp": timestamp,
                 "endpoint_name": self.endpoint_name,
-                "volume_path": "conor_smith/synthetic_data_app/synthetic_data_volume"
+                "volume_path": "conor_smith/synthetic_data_app/synthetic_data_volume",
+                "write_to_unity": "true" if write_to_unity else "false",
+                "unity_catalog_schema": "conor_smith.synthetic_data_app",
+                "unity_table_name": sanitized_table_name
             }
             
             self.generation_state['current_step'] = f"Submitting job to Databricks cluster..."
