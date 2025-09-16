@@ -383,10 +383,12 @@ class SyntheticDataGenerator:
         # Dynamic callback for operation configuration updates
         @self.app.callback(
             Output('operations-store', 'data', allow_duplicate=True),
-            [Input({'type': 'pdf-description', 'index': dash.dependencies.ALL}, 'value'),
+            [Input({'type': 'pdf-doc-name', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'pdf-description', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'pdf-doc-type', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'pdf-count', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'pdf-include-images', 'index': dash.dependencies.ALL}, 'value'),
+             Input({'type': 'text-doc-name', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-description', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-doc-type', 'index': dash.dependencies.ALL}, 'value'),
              Input({'type': 'text-format', 'index': dash.dependencies.ALL}, 'value'),
@@ -571,7 +573,9 @@ class SyntheticDataGenerator:
                                 op['config'] = {}
                             
                             # Update the specific config value
-                            if comp_type == 'pdf-description':
+                            if comp_type == 'pdf-doc-name':
+                                op['config']['doc_name'] = new_value
+                            elif comp_type == 'pdf-description':
                                 op['config']['description'] = new_value
                             elif comp_type == 'pdf-doc-type':
                                 op['config']['doc_type'] = new_value
@@ -579,6 +583,8 @@ class SyntheticDataGenerator:
                                 op['config']['count'] = new_value
                             elif comp_type == 'pdf-include-images':
                                 op['config']['include_images'] = 'include_images' in (new_value or [])
+                            elif comp_type == 'text-doc-name':
+                                op['config']['doc_name'] = new_value
                             elif comp_type == 'text-description':
                                 op['config']['description'] = new_value
                             elif comp_type == 'text-doc-type':
@@ -643,8 +649,13 @@ class SyntheticDataGenerator:
                                 table_name = op['config'].get('table_name', '')
                                 columns = op['config'].get('columns', [])
                                 op['configured'] = bool(table_name and table_name.strip() and len(columns) > 0)
+                            elif op['type'] in ['pdf', 'text']:
+                                # For PDF and text operations, require document name and description
+                                doc_name = op['config'].get('doc_name', '')
+                                description = op['config'].get('description', '')
+                                op['configured'] = bool(doc_name and doc_name.strip() and description and description.strip())
                             else:
-                                # For other operations, require description
+                                # For other operations, require description only
                                 description = op['config'].get('description', '')
                                 op['configured'] = bool(description and description.strip())
                             break
@@ -1547,13 +1558,21 @@ class SyntheticDataGenerator:
         # Create operation-specific configuration inputs
         if op_type == 'pdf':
             config_inputs = [
+                html.Label("Document Name:", className="form-label fw-bold"),
+                dbc.Input(
+                    id={'type': 'pdf-doc-name', 'index': op_id},
+                    placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
+                    value=config.get('doc_name', ''),
+                    className="mb-3"
+                ),
                 html.Label("Document Type:", className="form-label fw-bold"),
                 dcc.Dropdown(
                     id={'type': 'pdf-doc-type', 'index': op_id},
                     options=[
                         {'label': 'Policy Guide', 'value': 'policy_guide'},
                         {'label': 'Customer Correspondence', 'value': 'customer_correspondence'},
-                        {'label': 'Customer Profile', 'value': 'customer_profile'}
+                        {'label': 'Customer Profile', 'value': 'customer_profile'},
+                        {'label': 'Custom Document', 'value': 'custom_document'}
                     ],
                     value=config.get('doc_type', 'policy_guide'),
                     className="mb-3"
@@ -1593,13 +1612,21 @@ class SyntheticDataGenerator:
             ]
         elif op_type == 'text':
             config_inputs = [
+                html.Label("Document Name:", className="form-label fw-bold"),
+                dbc.Input(
+                    id={'type': 'text-doc-name', 'index': op_id},
+                    placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
+                    value=config.get('doc_name', ''),
+                    className="mb-3"
+                ),
                 html.Label("Document Type:", className="form-label fw-bold"),
                 dcc.Dropdown(
                     id={'type': 'text-doc-type', 'index': op_id},
                     options=[
                         {'label': 'Policy Guide', 'value': 'policy_guide'},
                         {'label': 'Customer Correspondence', 'value': 'customer_correspondence'},
-                        {'label': 'Customer Profile', 'value': 'customer_profile'}
+                        {'label': 'Customer Profile', 'value': 'customer_profile'},
+                        {'label': 'Custom Document', 'value': 'custom_document'}
                     ],
                     value=config.get('doc_type', 'policy_guide'),
                     className="mb-3"
@@ -2049,6 +2076,7 @@ class SyntheticDataGenerator:
         """Process a PDF generation operation."""
         config = operation.get('config', {})
         doc_type = config.get('doc_type', 'policy_guide')
+        doc_name = config.get('doc_name', '')
         description = config.get('description', 'Sample document')
         count = config.get('count', 1)
         include_images = config.get('include_images', False)
@@ -2058,7 +2086,7 @@ class SyntheticDataGenerator:
         
         for i in range(count):
             enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
-            item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, include_images)
+            item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, include_images, doc_name)
             items.append(item)
         
         return items
@@ -2067,6 +2095,7 @@ class SyntheticDataGenerator:
         """Process a text generation operation."""
         config = operation.get('config', {})
         doc_type = config.get('doc_type', 'policy_guide')
+        doc_name = config.get('doc_name', '')
         description = config.get('description', 'Sample document')
         file_format = config.get('file_format', 'txt')
         count = config.get('count', 1)
@@ -2076,7 +2105,7 @@ class SyntheticDataGenerator:
         
         for i in range(count):
             enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
-            item = self._generate_text_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, file_format)
+            item = self._generate_text_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, file_format, doc_name)
             items.append(item)
         
         return items
@@ -2096,7 +2125,7 @@ class SyntheticDataGenerator:
         
         return self._generate_tabular_item(table_name, row_count, columns, company_name, company_sector, timestamp)
 
-    def _generate_documents_background(self, doc_type, description, count):
+    def _generate_documents_background(self, doc_type, description, count, doc_name=''):
         """Generate documents in background thread with progress updates."""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2112,8 +2141,14 @@ class SyntheticDataGenerator:
                 # Update progress
                 self.generation_state['current_step'] = f"Creating PDF for document {i + 1}..."
                 
-                # Create filename
-                filename = f"{doc_type}_{timestamp}_{i+1:02d}.pdf"
+                # Create filename using document name if provided, otherwise fallback to doc_type
+                if doc_name:
+                    # Sanitize document name for filename
+                    safe_name = "".join(c for c in doc_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    safe_name = safe_name.replace(' ', '_')
+                    filename = f"{safe_name}_{timestamp}_{i+1:02d}.pdf"
+                else:
+                    filename = f"{doc_type}_{timestamp}_{i+1:02d}.pdf"
                 
                 # Generate PDF
                 pdf_path = self._create_pdf(content, filename, doc_type)
@@ -2188,7 +2223,19 @@ This should be document #{doc_number} in a series. Include:
 - Notes and interactions history
 - Risk assessment or credit information where relevant
 
-Generate a complete customer profile with realistic data (use fictional information)."""
+Generate a complete customer profile with realistic data (use fictional information).""",
+
+            'custom_document': f"""Create a custom document with these characteristics:
+{description}
+
+This should be document #{doc_number} in a series. Make it realistic and well-structured based on the requirements provided in the description. Include:
+- Appropriate formatting and structure for the document type
+- Professional presentation and language
+- Realistic details and content
+- Clear organization and flow
+- Complete content, not just an outline or template
+
+Generate a complete document that fulfills the specific requirements described."""
         }
         
         prompt = doc_prompts.get(doc_type, f"Create a {doc_type} document with these characteristics: {description}")
@@ -3496,7 +3543,8 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
         type_map = {
             'policy_guide': 'Policy Guide',
             'customer_correspondence': 'Customer Correspondence',
-            'customer_profile': 'Customer Profile'
+            'customer_profile': 'Customer Profile',
+            'custom_document': 'Custom Document'
         }
         return type_map.get(doc_type, doc_type.replace('_', ' ').title())
 
@@ -3823,7 +3871,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             
             if data_type == 'pdf':
                 # Generate PDF (existing functionality)
-                item_info = self._generate_pdf_item(description, company_name, company_sector, timestamp, 'policy_guide', False)
+                item_info = self._generate_pdf_item(description, company_name, company_sector, timestamp, 'policy_guide', False, '')
             elif data_type == 'text':
                 # Generate text document
                 item_info = self._generate_text_item(description, company_name, company_sector, timestamp)
@@ -3844,7 +3892,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             self.generation_state['active'] = False
             self.generation_state['error'] = str(e)
 
-    def _generate_pdf_item(self, description, company_name, company_sector, timestamp, doc_type='policy_guide', include_images=False):
+    def _generate_pdf_item(self, description, company_name, company_sector, timestamp, doc_type='policy_guide', include_images=False, doc_name=''):
         """Generate a single PDF item with optional AI-generated images."""
         # Enhanced prompt with company context
         enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
@@ -3852,8 +3900,14 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
         # Generate content using the serving endpoint
         content = self._generate_document_content(doc_type, enhanced_description, 1)
         
-        # Create filename
-        filename = f"synthetic_pdf_{timestamp}.pdf"
+        # Create filename using document name if provided, otherwise fallback to synthetic_pdf
+        if doc_name:
+            # Sanitize document name for filename
+            safe_name = "".join(c for c in doc_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            safe_name = safe_name.replace(' ', '_')
+            filename = f"{safe_name}_{timestamp}.pdf"
+        else:
+            filename = f"synthetic_pdf_{timestamp}.pdf"
         
         # Agentic workflow for image generation
         generated_images = []
@@ -3912,7 +3966,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             'images_generated': len(generated_images)
         }
 
-    def _generate_text_item(self, description, company_name, company_sector, timestamp, doc_type, file_format):
+    def _generate_text_item(self, description, company_name, company_sector, timestamp, doc_type, file_format, doc_name=''):
         """Generate a single text document with LLM content."""
         try:
             # Generate content using LLM (similar to PDF generation)
@@ -3931,13 +3985,24 @@ Please incorporate this company information naturally throughout the document to
             doc_number = int(timestamp.split('_')[-1]) if '_' in timestamp else 1
             content = self._generate_document_content(doc_type, enhanced_description, doc_number)
             
-            # Create filename based on format
-            if file_format == 'docx':
-                filename = f"{doc_type}_{timestamp}.docx"
-                extension = 'docx'
+            # Create filename using document name if provided, otherwise fallback to doc_type
+            if doc_name:
+                # Sanitize document name for filename
+                safe_name = "".join(c for c in doc_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_name = safe_name.replace(' ', '_')
+                if file_format == 'docx':
+                    filename = f"{safe_name}_{timestamp}.docx"
+                    extension = 'docx'
+                else:
+                    filename = f"{safe_name}_{timestamp}.txt"
+                    extension = 'txt'
             else:
-                filename = f"{doc_type}_{timestamp}.txt"
-                extension = 'txt'
+                if file_format == 'docx':
+                    filename = f"{doc_type}_{timestamp}.docx"
+                    extension = 'docx'
+                else:
+                    filename = f"{doc_type}_{timestamp}.txt"
+                    extension = 'txt'
                 
             # Create local file
             os.makedirs('./generated_documents', exist_ok=True)
