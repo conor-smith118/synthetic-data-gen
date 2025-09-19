@@ -2101,7 +2101,13 @@ class SyntheticDataGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         for i in range(count):
-            enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
+            enhanced_description = f"""For {company_name} (a {company_sector} company): {description}
+
+Company Context:
+- Company Name: {company_name}
+- Industry Sector: {company_sector}
+
+Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization. References to the company should feel authentic and contextually appropriate."""
             item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, include_images, doc_name)
             items.append(item)
         
@@ -2120,7 +2126,13 @@ class SyntheticDataGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         for i in range(count):
-            enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
+            enhanced_description = f"""For {company_name} (a {company_sector} company): {description}
+
+Company Context:
+- Company Name: {company_name}
+- Industry Sector: {company_sector}
+
+Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization. References to the company should feel authentic and contextually appropriate. Use the company name and industry context to create relevant examples, scenarios, and content that align with the {company_sector} sector."""
             item = self._generate_text_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, file_format, doc_name)
             items.append(item)
         
@@ -2210,56 +2222,65 @@ class SyntheticDataGenerator:
 
 This should be document #{doc_number} in a series. Make it realistic and detailed with:
 - Clear policy sections and subsections
-- Specific procedures and guidelines
+- Specific procedures and guidelines tailored to the company and industry sector
 - Professional formatting with headers
-- Realistic company policies and procedures
-- Compliance and regulatory information where appropriate
+- Realistic company policies and procedures that reflect the company's business context
+- Compliance and regulatory information appropriate for the industry sector
+- Company-specific references, examples, and scenarios throughout the document
+- Authentic integration of the company name and sector context in policies and procedures
 
-Generate a complete document with multiple sections, not just an outline.""",
+Generate a complete document with multiple sections, not just an outline. Ensure the company information is woven naturally throughout the content.""",
             
             'customer_correspondence': f"""Create a realistic customer correspondence document with these characteristics:
 {description}
 
 This should be document #{doc_number} in a series. Include:
 - Realistic customer information (use fictional names and details)
-- Professional business communication tone
-- Specific details about products, services, or issues
-- Appropriate formatting for business correspondence
+- Professional business communication tone appropriate for the company and industry
+- Specific details about products, services, or issues relevant to the company's sector
+- Appropriate formatting for business correspondence with company branding context
 - Dates, reference numbers, and other realistic details
+- Natural references to the company name and industry-specific terminology
+- Content that reflects the company's business operations and sector expertise
 
-Generate a complete correspondence document, not just a template.""",
+Generate a complete correspondence document, not just a template. Ensure the company information is authentically integrated throughout the communication.""",
             
             'customer_profile': f"""Create a detailed customer profile document with these characteristics:
 {description}
 
 This should be document #{doc_number} in a series. Include:
 - Comprehensive customer demographics and information
-- Purchase history and preferences
-- Account details and status
+- Purchase history and preferences relevant to the company's products/services
+- Account details and status using company-specific systems and terminology
 - Contact information and communication preferences
-- Notes and interactions history
-- Risk assessment or credit information where relevant
+- Notes and interactions history that reflect the company's business practices
+- Risk assessment or credit information appropriate for the industry sector
+- Customer relationship data that aligns with the company's sector and operations
+- References to company-specific programs, services, or products
 
-Generate a complete customer profile with realistic data (use fictional information).""",
+Generate a complete customer profile with realistic data (use fictional information). Ensure the profile reflects the company's industry context and business model.""",
 
             'custom_document': f"""Create a custom document with these characteristics:
 {description}
 
 This should be document #{doc_number} in a series. Make it realistic and well-structured based on the requirements provided in the description. Include:
 - Appropriate formatting and structure for the document type
-- Professional presentation and language
-- Realistic details and content
+- Professional presentation and language suited to the company and industry
+- Realistic details and content that reflect the company's business context
 - Clear organization and flow
 - Complete content, not just an outline or template
+- Natural integration of the company name and industry-specific terminology
+- Content that demonstrates understanding of the company's sector and operations
+- Examples, scenarios, or references that align with the company's business model
 
-Generate a complete document that fulfills the specific requirements described."""
+Generate a complete document that fulfills the specific requirements described. Ensure the company information is authentically woven throughout the content."""
         }
         
         prompt = doc_prompts.get(doc_type, f"Create a {doc_type} document with these characteristics: {description}")
         
         messages = [
-            {"role": "system", "content": "You are a professional document generator. Create realistic, detailed documents based on the user's specifications. Use fictional but realistic data. Make the documents comprehensive and well-structured. IMPORTANT: Return ONLY the document content itself, no reasoning, no metadata, no explanations - just the complete document text ready for PDF generation."},
-            {"role": "user", "content": prompt + "\n\nIMPORTANT: Respond with ONLY the complete document content. Do not include any reasoning, metadata, or explanations. Start directly with the document title and content."}
+            {"role": "system", "content": "You are a professional document generator. Create realistic, detailed documents based on the user's specifications. Use fictional but realistic data. Make the documents comprehensive and well-structured. When company information is provided, integrate it naturally and authentically throughout the document - use the company name, reference industry-specific practices, and create content that feels genuinely tailored to that organization and sector. IMPORTANT: Return ONLY the document content itself, no reasoning, no metadata, no explanations - just the complete document text ready for PDF generation."},
+            {"role": "user", "content": prompt + "\n\nIMPORTANT: Respond with ONLY the complete document content. Do not include any reasoning, metadata, or explanations. Start directly with the document title and content. Ensure company information is seamlessly integrated throughout the document."}
         ]
         
         try:
@@ -2478,6 +2499,22 @@ Generate a complete document that fulfills the specific requirements described."
 2. Relate to different sections or concepts in the document
 3. Be appropriate for a professional document
 4. Be realistic and achievable by an image generator
+5. Focus on visual elements, objects, scenes, and concepts
+6. AVOID any text, letters, numbers, words, signs, or readable content in the image
+7. Emphasize visual metaphors, abstract concepts, and symbolic representations
+8. Describe purely visual elements like objects, people, settings, colors, and compositions
+
+IMPORTANT: Do NOT include any prompts that would generate text, numbers, letters, documents, signs, screens with text, charts with labels, or any readable content. Focus on visual imagery only.
+
+Examples of GOOD prompts:
+- "A modern office environment with people collaborating around a conference table"
+- "Abstract representation of data flow with interconnected geometric shapes"
+- "Professional handshake in a corporate setting with warm lighting"
+
+Examples of BAD prompts (avoid these):
+- "Chart showing quarterly sales figures"
+- "Document with policy text visible"
+- "Computer screen displaying code or numbers"
 
 Format your response in one of these ways:
 - As a JSON array: ["prompt1", "prompt2", "prompt3"]
@@ -2488,7 +2525,7 @@ Format your response in one of these ways:
 
 Provide exactly 3 prompts, each on its own line or in a clear format."""
 
-            user_prompt = f"Document content:\n\n{pdf_content}\n\nGenerate 3 image prompts for this document."
+            user_prompt = f"Document content:\n\n{pdf_content}\n\nGenerate 3 image prompts for this document. Remember: Focus on visual elements only - NO text, numbers, letters, or readable content should be included in any of the image prompts."
 
             # Prepare messages for the endpoint
             messages = [
@@ -3911,8 +3948,14 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
 
     def _generate_pdf_item(self, description, company_name, company_sector, timestamp, doc_type='policy_guide', include_images=False, doc_name=''):
         """Generate a single PDF item with optional AI-generated images."""
-        # Enhanced prompt with company context
-        enhanced_description = f"For {company_name} (a {company_sector} company): {description}"
+        # Enhanced prompt with detailed company context
+        enhanced_description = f"""For {company_name} (a {company_sector} company): {description}
+
+Company Context:
+- Company Name: {company_name}
+- Industry Sector: {company_sector}
+
+Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization. References to the company should feel authentic and contextually appropriate."""
         
         # Generate content using the serving endpoint
         content = self._generate_document_content(doc_type, enhanced_description, 1)
@@ -3989,14 +4032,14 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             # Generate content using LLM (similar to PDF generation)
             self.generation_state['current_step'] = f"Generating {file_format.upper()} content..."
             
-            # Enhance description with company context
+            # Enhance description with detailed company context
             enhanced_description = f"""For {company_name} (a {company_sector} company): {description}
-            
+
 Company Context:
 - Company Name: {company_name}
 - Industry Sector: {company_sector}
 
-Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization."""
+Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization. References to the company should feel authentic and contextually appropriate. Use the company name and industry context to create relevant examples, scenarios, and content that align with the {company_sector} sector."""
             
             # Extract doc number from timestamp for document series numbering
             doc_number = int(timestamp.split('_')[-1]) if '_' in timestamp else 1
