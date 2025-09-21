@@ -1523,6 +1523,42 @@ class SyntheticDataGenerator:
                 return dash.no_update
 
         @self.app.callback(
+            Output({'type': 'unity-volume-selector', 'index': dash.dependencies.MATCH}, 'children'),
+            [Input({'type': 'pdf-volume', 'index': dash.dependencies.MATCH}, 'value'),
+             Input({'type': 'text-volume', 'index': dash.dependencies.MATCH}, 'value')],
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def update_volume_selector(pdf_volume_checkbox, text_volume_checkbox, operations_data):
+            """Update volume selector UI when Write to Volume checkbox changes."""
+            try:
+                ctx = dash.callback_context
+                if not ctx.triggered:
+                    return dash.no_update
+                
+                triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                op_index = json.loads(triggered_id)['index']
+                
+                # Determine which checkbox triggered and get its value
+                volume_checkbox = pdf_volume_checkbox if 'pdf-volume' in triggered_id else text_volume_checkbox
+                
+                # Find the operation
+                for op in operations_data:
+                    if op['id'] == op_index:
+                        # Update the write_to_volume config
+                        write_to_volume = 'write_to_volume' in (volume_checkbox or [])
+                        op['config']['write_to_volume'] = write_to_volume
+                        
+                        # Return updated volume selector UI
+                        return self._create_volume_selector_ui(op['config'], op_index)
+                
+                return dash.no_update
+                
+            except Exception as e:
+                print(f"Error updating volume selector: {e}")
+                return dash.no_update
+
+        @self.app.callback(
             [Output('schema-selection-modal', 'is_open'),
              Output('active-operation-store', 'data'),
              Output('selected-catalog-store', 'data'),
@@ -1797,6 +1833,275 @@ class SyntheticDataGenerator:
             
             return dash.no_update
 
+        # Volume selection callbacks (3-pane modal)
+        @self.app.callback(
+            [Output('volume-selection-modal', 'is_open'),
+             Output('active-volume-operation-store', 'data'),
+             Output('selected-volume-catalog-store', 'data'),
+             Output('selected-volume-schema-store', 'data'),
+             Output('selected-volume-store', 'data')],
+            [Input({'type': 'volume-selector-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
+             Input('volume-modal-confirm', 'n_clicks'),
+             Input('volume-modal-cancel', 'n_clicks')],
+            [State('volume-selection-modal', 'is_open'),
+             State('operations-store', 'data')],
+            prevent_initial_call=False
+        )
+        def handle_volume_modal(selector_clicks, confirm_clicks, cancel_clicks, is_open, operations_data):
+            """Handle volume selection modal open/close."""
+            ctx = dash.callback_context
+            
+            # If no context, return no updates
+            if not ctx.triggered:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            
+            try:
+                # Check if a volume selector button was clicked
+                if 'volume-selector-btn' in triggered_id and selector_clicks and any(selector_clicks):
+                    # Find the current volume for this operation
+                    button_info = json.loads(triggered_id)
+                    op_index = button_info['index']
+                    
+                    current_volume = 'conor_smith/synthetic_data_app/synthetic_data_volume'
+                    if operations_data:
+                        for op in operations_data:
+                            if op['id'] == op_index:
+                                current_volume = op['config'].get('unity_catalog_volume', current_volume)
+                                break
+                    
+                    # Parse current volume to set initial catalog/schema/volume selection
+                    volume_parts = current_volume.split('/')
+                    if len(volume_parts) >= 3:
+                        current_catalog, current_schema, current_volume_name = volume_parts[0], volume_parts[1], volume_parts[2]
+                    else:
+                        current_catalog, current_schema, current_volume_name = 'conor_smith', 'synthetic_data_app', 'synthetic_data_volume'
+                    
+                    # Open modal immediately and set initial selection
+                    return True, op_index, current_catalog, current_schema, current_volume_name
+                
+                # Modal buttons
+                elif 'volume-modal-confirm' in triggered_id:
+                    return False, dash.no_update, dash.no_update, dash.no_update, dash.no_update  # Close modal
+                elif 'volume-modal-cancel' in triggered_id:
+                    return False, dash.no_update, None, None, None  # Close modal and clear selection
+                    
+            except Exception as e:
+                print(f"Error in volume modal handler: {e}")
+                
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        @self.app.callback(
+            Output('volume-catalog-list', 'children'),
+            [Input('selected-volume-catalog-store', 'data'),
+             Input('volume-selection-modal', 'is_open')],
+            prevent_initial_call=True
+        )
+        def populate_volume_catalog_list(selected_catalog, is_modal_open):
+            """Populate volume catalog list when modal opens and update highlighting when selection changes."""
+            if not is_modal_open:
+                return dash.no_update
+            
+            try:
+                # Get available catalogs (only those with writable volumes)
+                catalogs = self._get_volume_catalogs()
+                
+                # Create catalog list UI with proper highlighting
+                catalog_children = []
+                for catalog in catalogs:
+                    # Highlight selected catalog
+                    is_selected = (catalog == selected_catalog)
+                    color = "primary" if is_selected else "light"
+                    outline = not is_selected
+                    
+                    catalog_children.append(
+                        dbc.Button(
+                            catalog,
+                            id={'type': 'volume-catalog-item', 'catalog': catalog},
+                            color=color,
+                            outline=outline,
+                            size="sm",
+                            className="w-100 mb-1 text-start",
+                            style={'border': '1px solid #dee2e6'}
+                        )
+                    )
+                
+                if not catalog_children:
+                    catalog_children = [html.P("Loading catalogs...", className="text-muted text-center mt-5")]
+                
+                return catalog_children
+                
+            except Exception as e:
+                print(f"Error populating volume catalog list: {e}")
+                return [
+                    dbc.Spinner(
+                        html.P("Loading catalogs...", className="text-muted text-center mt-5"),
+                        color="primary", size="sm"
+                    )
+                ]
+
+        @self.app.callback(
+            [Output('volume-schema-list', 'children'),
+             Output('selected-volume-catalog-store', 'data', allow_duplicate=True)],
+            Input({'type': 'volume-catalog-item', 'catalog': dash.dependencies.ALL}, 'n_clicks'),
+            [State('selected-volume-catalog-store', 'data')],
+            prevent_initial_call=True
+        )
+        def handle_volume_catalog_selection(catalog_clicks, current_catalog):
+            """Handle volume catalog selection and populate schemas."""
+            ctx = dash.callback_context
+            if not ctx.triggered or not any(catalog_clicks):
+                return dash.no_update, dash.no_update
+            
+            # Find which catalog was clicked
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            catalog_info = json.loads(triggered_id)
+            selected_catalog = catalog_info['catalog']
+            
+            # Get schemas for the selected catalog
+            schemas = self._get_volume_schemas(selected_catalog)
+            
+            # Create schema list UI
+            schema_children = []
+            for schema in schemas:
+                schema_children.append(
+                    dbc.Button(
+                        schema,
+                        id={'type': 'volume-schema-item', 'catalog': selected_catalog, 'schema': schema},
+                        color="light",
+                        outline=True,
+                        size="sm",
+                        className="w-100 mb-1 text-start",
+                        style={'border': '1px solid #dee2e6'}
+                    )
+                )
+            
+            if not schema_children:
+                schema_children.append(
+                    html.P("No schemas with WRITE_VOLUME permissions found", className="text-muted text-center mt-5")
+                )
+            
+            return schema_children, selected_catalog
+
+        @self.app.callback(
+            [Output('volume-list', 'children'),
+             Output('selected-volume-schema-store', 'data', allow_duplicate=True)],
+            Input({'type': 'volume-schema-item', 'catalog': dash.dependencies.ALL, 'schema': dash.dependencies.ALL}, 'n_clicks'),
+            [State('selected-volume-schema-store', 'data')],
+            prevent_initial_call=True
+        )
+        def handle_volume_schema_selection(schema_clicks, current_schema):
+            """Handle volume schema selection and populate volumes."""
+            ctx = dash.callback_context
+            if not ctx.triggered or not any(schema_clicks):
+                return dash.no_update, dash.no_update
+            
+            # Find which schema was clicked
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            schema_info = json.loads(triggered_id)
+            selected_catalog = schema_info['catalog']
+            selected_schema = schema_info['schema']
+            
+            # Get volumes for the selected catalog.schema
+            volumes = self._get_volumes(selected_catalog, selected_schema)
+            
+            # Create volume list UI
+            volume_children = []
+            for volume in volumes:
+                volume_children.append(
+                    dbc.Button(
+                        volume,
+                        id={'type': 'volume-item', 'catalog': selected_catalog, 'schema': selected_schema, 'volume': volume},
+                        color="light",
+                        outline=True,
+                        size="sm",
+                        className="w-100 mb-1 text-start",
+                        style={'border': '1px solid #dee2e6'}
+                    )
+                )
+            
+            if not volume_children:
+                volume_children.append(
+                    html.P("No volumes with WRITE_VOLUME permissions found", className="text-muted text-center mt-5")
+                )
+            
+            return volume_children, selected_schema
+
+        @self.app.callback(
+            [Output('selected-volume-preview', 'children'),
+             Output('volume-modal-confirm', 'disabled'),
+             Output('selected-volume-store', 'data', allow_duplicate=True)],
+            Input({'type': 'volume-item', 'catalog': dash.dependencies.ALL, 'schema': dash.dependencies.ALL, 'volume': dash.dependencies.ALL}, 'n_clicks'),
+            [State('selected-volume-catalog-store', 'data'),
+             State('selected-volume-schema-store', 'data')],
+            prevent_initial_call=True
+        )
+        def handle_volume_selection(volume_clicks, selected_catalog, selected_schema):
+            """Handle volume selection and update preview."""
+            ctx = dash.callback_context
+            if not ctx.triggered or not any(volume_clicks):
+                return dash.no_update, dash.no_update, dash.no_update
+            
+            # Find which volume was clicked
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            volume_info = json.loads(triggered_id)
+            selected_volume = volume_info['volume']
+            
+            if selected_catalog and selected_schema and selected_volume:
+                full_volume = f"{selected_catalog}/{selected_schema}/{selected_volume}"
+                return full_volume, False, selected_volume  # Enable confirm button
+            else:
+                return "None", True, None  # Disable confirm button
+
+        @self.app.callback(
+            Output('operations-store', 'data', allow_duplicate=True),
+            Input('volume-modal-confirm', 'n_clicks'),
+            [State('selected-volume-catalog-store', 'data'),
+             State('selected-volume-schema-store', 'data'),
+             State('selected-volume-store', 'data'),
+             State('operations-store', 'data'),
+             State('active-volume-operation-store', 'data')],
+            prevent_initial_call=True
+        )
+        def confirm_volume_selection_operations(confirm_clicks, selected_catalog, selected_schema, selected_volume, operations_data, active_operation_id):
+            """Update operations data with selected volume."""
+            if not confirm_clicks or not selected_catalog or not selected_schema or not selected_volume or not active_operation_id:
+                return dash.no_update
+            
+            # Create full volume path
+            full_volume = f"{selected_catalog}/{selected_schema}/{selected_volume}"
+            
+            # Update the operation with the selected volume
+            updated_operations = operations_data.copy()
+            for op in updated_operations:
+                if op['id'] == active_operation_id:
+                    op['config']['unity_catalog_volume'] = full_volume
+                    break
+            
+            return updated_operations
+
+        @self.app.callback(
+            Output({'type': 'selected-volume-display', 'index': dash.dependencies.MATCH}, 'children'),
+            Input('operations-store', 'data'),
+            State({'type': 'selected-volume-display', 'index': dash.dependencies.MATCH}, 'id'),
+            prevent_initial_call=True
+        )
+        def update_volume_display(operations_data, display_id):
+            """Update volume display when operations data changes."""
+            if not operations_data or not display_id:
+                return dash.no_update
+            
+            # Get the operation ID from the display component ID
+            op_id = display_id['index']
+            
+            # Find the corresponding operation and return its volume
+            for op in operations_data:
+                if op['id'] == op_id:
+                    return op['config'].get('unity_catalog_volume', 'conor_smith/synthetic_data_app/synthetic_data_volume')
+            
+            return dash.no_update
+
     def _get_writable_schemas(self):
         """Get list of catalog.schema combinations where the app has CREATE_TABLE permissions."""
         # Check if we have cached results
@@ -1848,6 +2153,57 @@ class SyntheticDataGenerator:
             self._cached_writable_schemas = fallback
             return fallback
 
+    def _get_writable_volumes(self):
+        """Get list of catalog.schema.volume combinations where the app has WRITE_VOLUME permissions."""
+        # Check if we have cached results
+        if hasattr(self, '_cached_writable_volumes'):
+            return self._cached_writable_volumes
+            
+        try:
+            from functools import lru_cache
+            from databricks import sql
+            from databricks.sdk.core import Config
+
+            cfg = Config()
+
+            @lru_cache(maxsize=1)
+            def get_connection(http_path):
+                return sql.connect(
+                    server_hostname=cfg.host,
+                    http_path=http_path,
+                    credentials_provider=lambda: cfg.authenticate,
+                )
+
+            # Query system information schema for WRITE_VOLUME privileges
+            http_path = "/sql/1.0/warehouses/8baced1ff014912d"
+            conn = get_connection(http_path)
+            
+            with conn.cursor() as cursor:
+                query = """
+                    SELECT DISTINCT volume_catalog, volume_schema, volume_name
+                    FROM system.information_schema.volume_privileges
+                    WHERE grantee = 'f729a9c2-7dcf-4228-819e-d61f6a93daf2'
+                    AND privilege_type = 'WRITE_VOLUME'
+                    ORDER BY volume_catalog, volume_schema, volume_name
+                """
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+            # Convert results to list of (catalog, schema, volume) tuples
+            writable_volumes = [(row[0], row[1], row[2]) for row in results if row[0] and row[1] and row[2]]
+            
+            if not writable_volumes:
+                writable_volumes = [('conor_smith', 'synthetic_data_app', 'synthetic_data_volume')]
+                
+            # Cache the results
+            self._cached_writable_volumes = writable_volumes
+            return writable_volumes
+            
+        except Exception as e:
+            fallback = [('conor_smith', 'synthetic_data_app', 'synthetic_data_volume')]
+            self._cached_writable_volumes = fallback
+            return fallback
+
     def _get_unity_catalogs(self):
         """Get list of Unity Catalogs that contain schemas with CREATE TABLE permissions."""
         try:
@@ -1870,6 +2226,44 @@ class SyntheticDataGenerator:
             
         except Exception:
             return ['synthetic_data_app'] if catalog_name == 'conor_smith' else []
+
+    def _get_volume_catalogs(self):
+        """Get list of catalogs that contain volumes with WRITE_VOLUME permissions."""
+        try:
+            writable_volumes = self._get_writable_volumes()
+            catalogs = list(set([catalog for catalog, schema, volume in writable_volumes]))
+            return sorted(catalogs)
+        except Exception:
+            return ['conor_smith']
+
+    def _get_volume_schemas(self, catalog_name):
+        """Get list of schemas in a specific catalog that contain volumes with WRITE_VOLUME permissions."""
+        try:
+            writable_volumes = self._get_writable_volumes()
+            schemas_for_catalog = list(set([schema for catalog, schema, volume in writable_volumes if catalog == catalog_name]))
+            
+            if not schemas_for_catalog and catalog_name == 'conor_smith':
+                schemas_for_catalog = ['synthetic_data_app']
+                
+            return sorted(schemas_for_catalog)
+            
+        except Exception:
+            return ['synthetic_data_app'] if catalog_name == 'conor_smith' else []
+
+    def _get_volumes(self, catalog_name, schema_name):
+        """Get list of volumes in a specific catalog.schema with WRITE_VOLUME permissions."""
+        try:
+            writable_volumes = self._get_writable_volumes()
+            volumes_for_schema = [volume for catalog, schema, volume in writable_volumes 
+                                  if catalog == catalog_name and schema == schema_name]
+            
+            if not volumes_for_schema and catalog_name == 'conor_smith' and schema_name == 'synthetic_data_app':
+                volumes_for_schema = ['synthetic_data_volume']
+                
+            return sorted(volumes_for_schema)
+            
+        except Exception:
+            return ['synthetic_data_volume'] if catalog_name == 'conor_smith' and schema_name == 'synthetic_data_app' else []
 
     def _create_schema_selector_ui(self, config, op_id):
         """Create schema selector UI for Unity Catalog."""
@@ -1896,6 +2290,38 @@ class SyntheticDataGenerator:
                     html.Small(
                         selected_schema,
                         id={'type': 'selected-schema-display', 'index': op_id},
+                        className="text-muted",
+                        style={'fontSize': '11px', 'lineHeight': '1.2'}
+                    )
+                ], width=True)
+            ], className="align-items-center g-1")
+        ]
+
+    def _create_volume_selector_ui(self, config, op_id):
+        """Create volume selector UI for Unity Catalog volumes."""
+        write_to_volume = config.get('write_to_volume', False)
+        selected_volume = config.get('unity_catalog_volume', 'conor_smith/synthetic_data_app/synthetic_data_volume')
+        
+        if not write_to_volume:
+            return []
+        
+        return [
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button(
+                        html.I(className="fas fa-hdd"),
+                        id={'type': 'volume-selector-btn', 'index': op_id},
+                        color="light",
+                        size="sm",
+                        outline=True,
+                        className="me-2",
+                        title="Select Unity Catalog Volume"
+                    )
+                ], width="auto"),
+                dbc.Col([
+                    html.Small(
+                        selected_volume,
+                        id={'type': 'selected-volume-display', 'index': op_id},
                         className="text-muted",
                         style={'fontSize': '11px', 'lineHeight': '1.2'}
                     )
@@ -2025,6 +2451,23 @@ class SyntheticDataGenerator:
                     ),
                     html.Small("Generate 3 contextual images based on document content", 
                               className="text-muted d-block")
+                ], className="mb-3"),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Checklist(
+                            options=[{"label": "Write to Volume", "value": "write_to_volume"}],
+                            value=["write_to_volume"] if config.get('write_to_volume', False) else [],
+                            id={'type': 'pdf-volume', 'index': op_id},
+                            className="mt-1"
+                        )
+                    ], width="auto"),
+                    dbc.Col([
+                        html.Div(
+                            id={'type': 'unity-volume-selector', 'index': op_id},
+                            children=self._create_volume_selector_ui(config, op_id),
+                            className="mt-1"
+                        )
+                    ], width=True)
                 ], className="mb-3")
             ]
         elif op_type == 'text':
@@ -2077,7 +2520,24 @@ class SyntheticDataGenerator:
                     value=config.get('count', 1),
                     marks={i: str(i) for i in range(1, 11)},
                     className="mb-3"
-                )
+                ),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Checklist(
+                            options=[{"label": "Write to Volume", "value": "write_to_volume"}],
+                            value=["write_to_volume"] if config.get('write_to_volume', False) else [],
+                            id={'type': 'text-volume', 'index': op_id},
+                            className="mt-1"
+                        )
+                    ], width="auto"),
+                    dbc.Col([
+                        html.Div(
+                            id={'type': 'unity-volume-selector', 'index': op_id},
+                            children=self._create_volume_selector_ui(config, op_id),
+                            className="mt-1"
+                        )
+                    ], width=True)
+                ], className="mb-3")
             ]
         elif op_type == 'tabular':
             config_inputs = [
@@ -2520,6 +2980,8 @@ class SyntheticDataGenerator:
         description = config.get('description', 'Sample document')
         count = config.get('count', 1)
         include_images = config.get('include_images', False)
+        write_to_volume = config.get('write_to_volume', False)
+        unity_catalog_volume = config.get('unity_catalog_volume', 'conor_smith/synthetic_data_app/synthetic_data_volume')
         
         items = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2532,7 +2994,7 @@ Company Context:
 - Industry Sector: {company_sector}
 
 Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization. References to the company should feel authentic and contextually appropriate."""
-            item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, include_images, doc_name)
+            item = self._generate_pdf_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, include_images, doc_name, write_to_volume, unity_catalog_volume)
             items.append(item)
         
         return items
@@ -2545,6 +3007,8 @@ Please incorporate this company information naturally throughout the document to
         description = config.get('description', 'Sample document')
         file_format = config.get('file_format', 'txt')
         count = config.get('count', 1)
+        write_to_volume = config.get('write_to_volume', False)
+        unity_catalog_volume = config.get('unity_catalog_volume', 'conor_smith/synthetic_data_app/synthetic_data_volume')
         
         items = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2557,7 +3021,7 @@ Company Context:
 - Industry Sector: {company_sector}
 
 Please incorporate this company information naturally throughout the document to make it specific and realistic for this organization. References to the company should feel authentic and contextually appropriate. Use the company name and industry context to create relevant examples, scenarios, and content that align with the {company_sector} sector."""
-            item = self._generate_text_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, file_format, doc_name)
+            item = self._generate_text_item(enhanced_description, company_name, company_sector, f"{timestamp}_{i+1}", doc_type, file_format, doc_name, write_to_volume, unity_catalog_volume)
             items.append(item)
         
         return items
@@ -3714,7 +4178,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
         
         return content
 
-    def _save_to_volume(self, local_path, filename):
+    def _save_to_volume(self, local_path, filename, unity_catalog_volume=None):
         """Save file to Databricks volume using WorkspaceClient pattern from cookbook."""
         import io
         from databricks.sdk import WorkspaceClient
@@ -3729,8 +4193,13 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             binary_data = io.BytesIO(file_bytes)
             
             # Construct volume file path
-            # self.volume_path is "/Volumes/conor_smith/synthetic_data_app/synthetic_data_volume"
-            volume_file_path = f"{self.volume_path}/{filename}"
+            if unity_catalog_volume:
+                # Convert catalog/schema/volume format to volume path
+                volume_path = f"/Volumes/{unity_catalog_volume.replace('/', '/')}"  # Already in correct format
+                volume_file_path = f"{volume_path}/{filename}"
+            else:
+                # Use default volume path
+                volume_file_path = f"{self.volume_path}/{filename}"
             
             print(f"Uploading to volume: {volume_file_path}")
             w.files.upload(volume_file_path, binary_data, overwrite=True)
@@ -4350,10 +4819,10 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             
             if data_type == 'pdf':
                 # Generate PDF (existing functionality)
-                item_info = self._generate_pdf_item(description, company_name, company_sector, timestamp, 'policy_guide', False, '')
+                item_info = self._generate_pdf_item(description, company_name, company_sector, timestamp, 'policy_guide', False, '', False, 'conor_smith/synthetic_data_app/synthetic_data_volume')
             elif data_type == 'text':
                 # Generate text document
-                item_info = self._generate_text_item(description, company_name, company_sector, timestamp)
+                item_info = self._generate_text_item(description, company_name, company_sector, timestamp, 'policy_guide', 'txt', '', False, 'conor_smith/synthetic_data_app/synthetic_data_volume')
             elif data_type == 'tabular':
                 # Generate tabular data
                 item_info = self._generate_tabular_item('sample_table', 1000, [], company_name, company_sector, timestamp, False, 'conor_smith.synthetic_data_app')
@@ -4371,7 +4840,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
             self.generation_state['active'] = False
             self.generation_state['error'] = str(e)
 
-    def _generate_pdf_item(self, description, company_name, company_sector, timestamp, doc_type='policy_guide', include_images=False, doc_name=''):
+    def _generate_pdf_item(self, description, company_name, company_sector, timestamp, doc_type='policy_guide', include_images=False, doc_name='', write_to_volume=False, unity_catalog_volume='conor_smith/synthetic_data_app/synthetic_data_volume'):
         """Generate a single PDF item with optional AI-generated images."""
         # Enhanced prompt with detailed company context
         enhanced_description = f"""For {company_name} (a {company_sector} company): {description}
@@ -4427,16 +4896,20 @@ Please incorporate this company information naturally throughout the document to
             print("📄 Creating standard PDF...")
             pdf_path = self._create_pdf(content, filename, doc_type)
         
-        # Update progress and save to volume
-        self.generation_state['current_step'] = f"💾 Saving PDF to volume..."
-        
-        try:
-            self._save_to_volume(pdf_path, filename)
-            save_success = True
-        except Exception as e:
-            save_success = False
-            print(f"Failed to save PDF to volume: {str(e)}")
-            # For iterative generation, we don't fail completely on volume save errors
+        # Conditionally save to volume based on user selection
+        save_success = True
+        if write_to_volume:
+            self.generation_state['current_step'] = f"💾 Saving PDF to volume {unity_catalog_volume}..."
+            try:
+                self._save_to_volume(pdf_path, filename, unity_catalog_volume)
+                save_success = True
+                print(f"✅ PDF saved to volume: {unity_catalog_volume}")
+            except Exception as e:
+                save_success = False
+                print(f"❌ Failed to save PDF to volume {unity_catalog_volume}: {str(e)}")
+        else:
+            self.generation_state['current_step'] = f"💾 PDF saved locally..."
+            print(f"📁 PDF saved locally: {pdf_path}")
         
         return {
             'type': 'pdf',
@@ -4451,7 +4924,7 @@ Please incorporate this company information naturally throughout the document to
             'images_generated': len(generated_images)
         }
 
-    def _generate_text_item(self, description, company_name, company_sector, timestamp, doc_type, file_format, doc_name=''):
+    def _generate_text_item(self, description, company_name, company_sector, timestamp, doc_type, file_format, doc_name='', write_to_volume=False, unity_catalog_volume='conor_smith/synthetic_data_app/synthetic_data_volume'):
         """Generate a single text document with LLM content."""
         try:
             # Generate content using LLM (similar to PDF generation)
@@ -4498,9 +4971,18 @@ Please incorporate this company information naturally throughout the document to
             else:
                 self._create_txt(content, local_path, company_name)
             
-            # Save to volume
-            self.generation_state['current_step'] = f"Saving {extension.upper()} to volume..."
-            volume_success = self._save_to_volume(local_path, filename)
+            # Conditionally save to volume based on user selection
+            if write_to_volume:
+                self.generation_state['current_step'] = f"Saving {extension.upper()} to volume {unity_catalog_volume}..."
+                volume_success = self._save_to_volume(local_path, filename, unity_catalog_volume)
+                if volume_success:
+                    print(f"✅ {extension.upper()} saved to volume: {unity_catalog_volume}")
+                else:
+                    print(f"❌ Failed to save {extension.upper()} to volume: {unity_catalog_volume}")
+            else:
+                self.generation_state['current_step'] = f"{extension.upper()} saved locally..."
+                volume_success = False  # Not saved to volume
+                print(f"📁 {extension.upper()} saved locally: {local_path}")
             
             return {
                 'type': 'text',

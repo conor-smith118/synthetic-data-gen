@@ -165,6 +165,10 @@ else:
                 dcc.Store(id="active-operation-store", data=None),  # Store for tracking active operation ID
                 dcc.Store(id="selected-catalog-store", data=None),  # Store for selected catalog
                 dcc.Store(id="selected-schema-store", data=None),   # Store for selected schema
+                dcc.Store(id="selected-volume-catalog-store", data=None),  # Store for selected volume catalog
+                dcc.Store(id="selected-volume-schema-store", data=None),   # Store for selected volume schema
+                dcc.Store(id="selected-volume-store", data=None),          # Store for selected volume
+                dcc.Store(id="active-volume-operation-store", data=None),  # Store for tracking active volume operation ID
                 dcc.Download(id="download-files-component"),
                 
                 # Schema Selection Modal
@@ -214,6 +218,67 @@ else:
                         dbc.Button("Select Schema", id="schema-modal-confirm", color="primary", disabled=True)
                     ])
                 ], id="schema-selection-modal", is_open=False, size="lg"),
+                
+                # Volume Selection Modal (3-pane: Catalog, Schema, Volume)
+                dbc.Modal([
+                    dbc.ModalHeader(dbc.ModalTitle("Select Unity Catalog Volume")),
+                    dbc.ModalBody([
+                        html.P("Select a catalog, schema, and volume where you have WRITE_VOLUME permissions:", className="mb-3"),
+                        dbc.Row([
+                            # Left pane - Catalogs
+                            dbc.Col([
+                                html.H6("Catalogs", className="mb-2"),
+                                html.Div([
+                                    dbc.Spinner(
+                                        html.Div(id="volume-catalog-list", className="border p-2", style={
+                                            'height': '250px', 
+                                            'overflow-y': 'auto',
+                                            'background-color': '#f8f9fa'
+                                        }, children=[
+                                            html.P("Loading catalogs...", className="text-muted text-center mt-5")
+                                        ]),
+                                        color="primary", size="sm"
+                                    )
+                                ])
+                            ], width=4),
+                            # Middle pane - Schemas  
+                            dbc.Col([
+                                html.H6("Schemas", className="mb-2"),
+                                html.Div([
+                                    html.Div(id="volume-schema-list", className="border p-2", style={
+                                        'height': '250px',
+                                        'overflow-y': 'auto', 
+                                        'background-color': '#f8f9fa'
+                                    }, children=[
+                                        html.P("Select a catalog first", className="text-muted text-center mt-5")
+                                    ])
+                                ])
+                            ], width=4),
+                            # Right pane - Volumes
+                            dbc.Col([
+                                html.H6("Volumes", className="mb-2"),
+                                html.Div([
+                                    html.Div(id="volume-list", className="border p-2", style={
+                                        'height': '250px',
+                                        'overflow-y': 'auto', 
+                                        'background-color': '#f8f9fa'
+                                    }, children=[
+                                        html.P("Select a schema first", className="text-muted text-center mt-5")
+                                    ])
+                                ])
+                            ], width=4)
+                        ], className="mb-3"),
+                        html.Hr(),
+                        html.Div([
+                            html.Strong("Selected: "),
+                            html.Span(id="selected-volume-preview", children="None", className="text-primary")
+                        ], className="mb-2")
+                    ]),
+                    dbc.ModalFooter([
+                        dbc.Button("Cancel", id="volume-modal-cancel", color="secondary"),
+                        dbc.Button("Select Volume", id="volume-modal-confirm", color="primary", disabled=True)
+                    ])
+                ], id="volume-selection-modal", is_open=False, size="xl"),
                 
                 dcc.Interval(
                     id="progress-interval",
