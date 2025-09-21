@@ -1490,6 +1490,140 @@ class SyntheticDataGenerator:
         # NOTE: Row count validation is now handled directly in the main operations callback above
         # to avoid race conditions between multiple callbacks
 
+        @self.app.callback(
+            Output({'type': 'unity-schema-selector', 'index': dash.dependencies.MATCH}, 'children'),
+            Input({'type': 'tabular-unity', 'index': dash.dependencies.MATCH}, 'value'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def update_schema_selector(unity_checkbox, operations_data):
+            """Update schema selector UI when Unity Catalog checkbox changes."""
+            try:
+                ctx = dash.callback_context
+                if not ctx.triggered:
+                    return dash.no_update
+                
+                triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                op_index = json.loads(triggered_id)['index']
+                
+                # Find the operation
+                for op in operations_data:
+                    if op['id'] == op_index:
+                        # Update the write_to_unity config
+                        write_to_unity = 'write_to_unity' in (unity_checkbox or [])
+                        op['config']['write_to_unity'] = write_to_unity
+                        
+                        # Return updated schema selector UI
+                        return self._create_schema_selector_ui(op['config'], op_index)
+                
+                return dash.no_update
+                
+            except Exception as e:
+                print(f"Error updating schema selector: {e}")
+                return dash.no_update
+
+        @self.app.callback(
+            [Output('schema-selection-modal', 'is_open'),
+             Output('schema-input', 'value'),
+             Output('active-operation-store', 'data')],
+            [Input({'type': 'schema-selector-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
+             Input('schema-modal-confirm', 'n_clicks'),
+             Input('schema-modal-cancel', 'n_clicks')],
+            [State('schema-selection-modal', 'is_open'),
+             State('schema-input', 'value'),
+             State('operations-store', 'data')],
+            prevent_initial_call=True
+        )
+        def handle_schema_modal(selector_clicks, confirm_clicks, cancel_clicks, is_open, schema_value, operations_data):
+            """Handle schema selection modal open/close."""
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return dash.no_update, dash.no_update, dash.no_update
+            
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            
+            try:
+                # Check if a schema selector button was clicked
+                if 'schema-selector-btn' in triggered_id:
+                    # Find the current schema for this operation
+                    button_info = json.loads(triggered_id)
+                    op_index = button_info['index']
+                    
+                    for op in operations_data:
+                        if op['id'] == op_index:
+                            current_schema = op['config'].get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
+                            return True, current_schema, op_index  # Open modal with current schema and store operation ID
+                    
+                    return True, 'conor_smith.synthetic_data_app', op_index  # Open modal with default and store operation ID
+                
+                # Modal buttons
+                elif 'schema-modal-confirm' in triggered_id:
+                    return False, dash.no_update, dash.no_update  # Close modal, keep current value, keep operation ID
+                elif 'schema-modal-cancel' in triggered_id:
+                    return False, dash.no_update, dash.no_update  # Close modal, keep current value, keep operation ID
+                    
+            except Exception as e:
+                print(f"Error in schema modal handler: {e}")
+                
+            return dash.no_update, dash.no_update, dash.no_update
+
+        @self.app.callback(
+            [Output('operations-store', 'data', allow_duplicate=True),
+             Output({'type': 'selected-schema-display', 'index': dash.dependencies.MATCH}, 'children')],
+            Input('schema-modal-confirm', 'n_clicks'),
+            [State('schema-input', 'value'),
+             State('operations-store', 'data'),
+             State('active-operation-store', 'data')],
+            prevent_initial_call=True
+        )
+        def confirm_schema_selection(confirm_clicks, schema_value, operations_data, active_operation_id):
+            """Update operation config with selected schema."""
+            if not confirm_clicks or not schema_value or not active_operation_id:
+                return dash.no_update, dash.no_update
+            
+            updated_operations = operations_data.copy()
+            updated_schema_display = schema_value
+            
+            # Update only the active operation
+            for op in updated_operations:
+                if op['id'] == active_operation_id:
+                    op['config']['unity_catalog_schema'] = schema_value
+                    break
+            
+            return updated_operations, updated_schema_display
+
+    def _create_schema_selector_ui(self, config, op_id):
+        """Create schema selector UI for Unity Catalog."""
+        write_to_unity = config.get('write_to_unity', False)
+        selected_schema = config.get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
+        
+        if not write_to_unity:
+            return []
+        
+        return [
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button(
+                        html.I(className="fas fa-folder"),
+                        id={'type': 'schema-selector-btn', 'index': op_id},
+                        color="light",
+                        size="sm",
+                        outline=True,
+                        className="me-2",
+                        title="Select Unity Catalog Schema"
+                    )
+                ], width="auto"),
+                dbc.Col([
+                    html.Small(
+                        selected_schema,
+                        id={'type': 'selected-schema-display', 'index': op_id},
+                        className="text-muted",
+                        style={'fontSize': '11px', 'lineHeight': '1.2'}
+                    )
+                ], width=True)
+            ], className="align-items-center g-1")
+        ]
+
     def _create_custom_values_inputs(self, custom_values, custom_weights, use_weights, op_id, col_id):
         """Create input fields for custom values and optional weights."""
         children = []
@@ -1679,12 +1813,23 @@ class SyntheticDataGenerator:
                         ),
                     ], width=8),
                     dbc.Col([
-                        dbc.Checklist(
-                            options=[{"label": "Write to Unity Catalog", "value": "write_to_unity"}],
-                            value=["write_to_unity"] if config.get('write_to_unity', False) else [],
-                            id={'type': 'tabular-unity', 'index': op_id},
-                            className="mt-1"
-                        )
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Checklist(
+                                    options=[{"label": "Write to Unity Catalog", "value": "write_to_unity"}],
+                                    value=["write_to_unity"] if config.get('write_to_unity', False) else [],
+                                    id={'type': 'tabular-unity', 'index': op_id},
+                                    className="mt-1"
+                                )
+                            ], width="auto"),
+                            dbc.Col([
+                                html.Div(
+                                    id={'type': 'unity-schema-selector', 'index': op_id},
+                                    children=self._create_schema_selector_ui(config, op_id),
+                                    className="mt-1"
+                                )
+                            ], width=True)
+                        ])
                     ], width=4)
                 ], className="mb-3"),
                 html.Label("Number of Rows:", className="form-label fw-bold"),
@@ -2145,6 +2290,7 @@ Please incorporate this company information naturally throughout the document to
         row_count = config.get('row_count', 1000)
         columns = config.get('columns', [])
         write_to_unity = config.get('write_to_unity', False)
+        unity_catalog_schema = config.get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
         
         if not columns:
             # If no columns configured, skip this operation
@@ -2152,7 +2298,7 @@ Please incorporate this company information naturally throughout the document to
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        return self._generate_tabular_item(table_name, row_count, columns, company_name, company_sector, timestamp, write_to_unity)
+        return self._generate_tabular_item(table_name, row_count, columns, company_name, company_sector, timestamp, write_to_unity, unity_catalog_schema)
 
     def _generate_documents_background(self, doc_type, description, count, doc_name=''):
         """Generate documents in background thread with progress updates."""
@@ -3931,7 +4077,7 @@ Provide exactly 3 prompts, each on its own line or in a clear format."""
                 item_info = self._generate_text_item(description, company_name, company_sector, timestamp)
             elif data_type == 'tabular':
                 # Generate tabular data
-                item_info = self._generate_tabular_item('sample_table', 1000, [], company_name, company_sector, timestamp, False)
+                item_info = self._generate_tabular_item('sample_table', 1000, [], company_name, company_sector, timestamp, False, 'conor_smith.synthetic_data_app')
             else:
                 raise Exception(f"Unknown data type: {data_type}")
             
@@ -4107,7 +4253,7 @@ Please incorporate this company information naturally throughout the document to
                 'size': 0
             }
 
-    def _generate_tabular_item(self, table_name, row_count, columns, company_name, company_sector, timestamp, write_to_unity=False):
+    def _generate_tabular_item(self, table_name, row_count, columns, company_name, company_sector, timestamp, write_to_unity=False, unity_catalog_schema='conor_smith.synthetic_data_app'):
         """Generate tabular data using Databricks job on remote cluster."""
         try:
             self.generation_state['current_step'] = f"Starting Databricks job for {row_count} rows of tabular data..."
@@ -4144,7 +4290,7 @@ Please incorporate this company information naturally throughout the document to
                 "endpoint_name": self.endpoint_name,
                 "volume_path": "conor_smith/synthetic_data_app/synthetic_data_volume",
                 "write_to_unity": "true" if write_to_unity else "false",
-                "unity_catalog_schema": "conor_smith.synthetic_data_app",
+                "unity_catalog_schema": unity_catalog_schema,
                 "unity_table_name": sanitized_table_name
             }
             

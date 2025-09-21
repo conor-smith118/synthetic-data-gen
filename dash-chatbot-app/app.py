@@ -162,7 +162,33 @@ else:
                 dcc.Store(id="progress-store"),
                 dcc.Store(id="history-store", data=[]),
                 dcc.Store(id="operations-store", data=[]),
+                dcc.Store(id="active-operation-store", data=None),  # Store for tracking active operation ID
                 dcc.Download(id="download-files-component"),
+                
+                # Schema Selection Modal
+                dbc.Modal([
+                    dbc.ModalHeader(dbc.ModalTitle("Select Unity Catalog Schema")),
+                    dbc.ModalBody([
+                        html.P("Select a Unity Catalog schema for storing your table:", className="mb-3"),
+                        dbc.InputGroup([
+                            dbc.InputGroupText("Schema:"),
+                            dbc.Input(
+                                id="schema-input",
+                                placeholder="catalog.schema (e.g., conor_smith.synthetic_data_app)",
+                                value="conor_smith.synthetic_data_app"
+                            )
+                        ], className="mb-3"),
+                        html.Small(
+                            "Enter the full schema path in the format 'catalog.schema'",
+                            className="text-muted"
+                        )
+                    ]),
+                    dbc.ModalFooter([
+                        dbc.Button("Cancel", id="schema-modal-cancel", color="secondary"),
+                        dbc.Button("Select Schema", id="schema-modal-confirm", color="primary")
+                    ])
+                ], id="schema-selection-modal", is_open=False),
+                
                 dcc.Interval(
                     id="progress-interval",
                     interval=500,  # Update every 500ms
