@@ -1774,80 +1774,76 @@ class SyntheticDataGenerator:
             
             return dash.no_update
 
+    def _get_writable_schemas(self):
+        """Get list of catalog.schema combinations where the app has CREATE_TABLE permissions."""
+        # Check if we have cached results
+        if hasattr(self, '_cached_writable_schemas'):
+            return self._cached_writable_schemas
+            
+        try:
+            from functools import lru_cache
+            from databricks import sql
+            from databricks.sdk.core import Config
+
+            cfg = Config()
+
+            @lru_cache(maxsize=1)
+            def get_connection(http_path):
+                return sql.connect(
+                    server_hostname=cfg.host,
+                    http_path=http_path,
+                    credentials_provider=lambda: cfg.authenticate,
+                )
+
+            # Query system information schema for CREATE_TABLE privileges
+            http_path = "/sql/1.0/warehouses/8baced1ff014912d"
+            conn = get_connection(http_path)
+            
+            with conn.cursor() as cursor:
+                query = """
+                    SELECT catalog_name, schema_name
+                    FROM system.information_schema.schema_privileges
+                    WHERE grantee = 'f729a9c2-7dcf-4228-819e-d61f6a93daf2'
+                    AND privilege_type = 'CREATE_TABLE'
+                    ORDER BY catalog_name, schema_name
+                """
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+            # Convert results to list of (catalog, schema) tuples
+            writable_schemas = [(row[0], row[1]) for row in results if row[0] and row[1]]
+            
+            if not writable_schemas:
+                writable_schemas = [('conor_smith', 'synthetic_data_app')]
+                
+            # Cache the results
+            self._cached_writable_schemas = writable_schemas
+            return writable_schemas
+            
+        except Exception as e:
+            fallback = [('conor_smith', 'synthetic_data_app')]
+            self._cached_writable_schemas = fallback
+            return fallback
+
     def _get_unity_catalogs(self):
         """Get list of Unity Catalogs that contain schemas with CREATE TABLE permissions."""
         try:
-            from databricks.sdk import WorkspaceClient
-            w = WorkspaceClient()
-            
-            all_catalogs = list(w.catalogs.list())
-            catalogs_with_writable_schemas = []
-            
-            for catalog in all_catalogs:
-                if not catalog.name:
-                    continue
-                    
-                try:
-                    # Check if this catalog has any schemas where we can create tables
-                    schemas = list(w.schemas.list(catalog_name=catalog.name))
-                    has_writable_schema = False
-                    
-                    for schema in schemas:
-                        if not schema.name:
-                            continue
-                            
-                        try:
-                            # Test CREATE TABLE permission by checking if we can access schema info
-                            # and if the schema allows table operations
-                            schema_info = w.schemas.get(catalog_name=catalog.name, schema_name=schema.name)
-                            if schema_info:
-                                has_writable_schema = True
-                                break
-                        except:
-                            continue
-                    
-                    if has_writable_schema:
-                        catalogs_with_writable_schemas.append(catalog.name)
-                        
-                except:
-                    continue
-            
-            if not catalogs_with_writable_schemas:
-                catalogs_with_writable_schemas = ['conor_smith']
-            
-            return sorted(catalogs_with_writable_schemas)
-            
-        except Exception as e:
+            writable_schemas = self._get_writable_schemas()
+            catalogs = list(set([catalog for catalog, schema in writable_schemas]))
+            return sorted(catalogs)
+        except Exception:
             return ['conor_smith']
 
     def _get_unity_schemas(self, catalog_name):
-        """Get list of schemas where the app has CREATE TABLE permissions."""
+        """Get list of schemas in a specific catalog where the app has CREATE TABLE permissions."""
         try:
-            from databricks.sdk import WorkspaceClient
-            w = WorkspaceClient()
+            writable_schemas = self._get_writable_schemas()
+            schemas_for_catalog = [schema for catalog, schema in writable_schemas if catalog == catalog_name]
             
-            all_schemas = list(w.schemas.list(catalog_name=catalog_name))
-            writable_schemas = []
-            
-            for schema in all_schemas:
-                if not schema.name:
-                    continue
-                    
-                try:
-                    # Test CREATE TABLE permission by checking if we can get schema details
-                    # and access table operations in this schema
-                    schema_info = w.schemas.get(catalog_name=catalog_name, schema_name=schema.name)
-                    if schema_info:
-                        # Additional check: try to list tables to ensure we have operational access
-                        list(w.tables.list(catalog_name=catalog_name, schema_name=schema.name, max_results=1))
-                        writable_schemas.append(schema.name)
-                except:
-                    continue
-            
-            if not writable_schemas and catalog_name == 'conor_smith':
-                writable_schemas = ['synthetic_data_app']
-            
-            return sorted(writable_schemas)
+            if not schemas_for_catalog and catalog_name == 'conor_smith':
+                schemas_for_catalog = ['synthetic_data_app']
+                
+            return sorted(schemas_for_catalog)
             
         except Exception:
             return ['synthetic_data_app'] if catalog_name == 'conor_smith' else []
