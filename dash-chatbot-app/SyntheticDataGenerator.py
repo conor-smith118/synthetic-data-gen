@@ -1524,7 +1524,6 @@ class SyntheticDataGenerator:
 
         @self.app.callback(
             [Output('schema-selection-modal', 'is_open'),
-             Output('catalog-list', 'children'),
              Output('active-operation-store', 'data'),
              Output('selected-catalog-store', 'data'),
              Output('selected-schema-store', 'data')],
@@ -1541,7 +1540,7 @@ class SyntheticDataGenerator:
             
             # If no context, return no updates
             if not ctx.triggered:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
             
             triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
             
@@ -1565,45 +1564,69 @@ class SyntheticDataGenerator:
                     else:
                         current_catalog, current_schema_name = 'conor_smith', 'synthetic_data_app'
                     
-                    # Get available catalogs (only those with writable schemas)
-                    catalogs = self._get_unity_catalogs()
-                    
-                    # Create catalog list UI
-                    catalog_children = []
-                    for catalog in catalogs:
-                        # Highlight current catalog
-                        is_current = (catalog == current_catalog)
-                        color = "primary" if is_current else "light"
-                        outline = not is_current
-                        
-                        catalog_children.append(
-                            dbc.Button(
-                                catalog,
-                                id={'type': 'catalog-item', 'catalog': catalog},
-                                color=color,
-                                outline=outline,
-                                size="sm",
-                                className="w-100 mb-1 text-start",
-                                style={'border': '1px solid #dee2e6'}
-                            )
-                        )
-                    
-                    if not catalog_children:
-                        catalog_children = [html.P("No catalogs with CREATE TABLE permissions found", className="text-muted text-center mt-5")]
-                    
-                    return True, catalog_children, op_index, current_catalog, current_schema_name
+                    # Open modal immediately and set initial selection
+                    return True, op_index, current_catalog, current_schema_name
                 
                 # Modal buttons
                 elif 'schema-modal-confirm' in triggered_id:
-                    return False, dash.no_update, dash.no_update, dash.no_update, dash.no_update  # Close modal
+                    return False, dash.no_update, dash.no_update, dash.no_update  # Close modal
                 elif 'schema-modal-cancel' in triggered_id:
-                    return False, dash.no_update, dash.no_update, None, None  # Close modal and clear selection
+                    return False, dash.no_update, None, None  # Close modal and clear selection
                     
             except Exception as e:
                 print(f"Error in schema modal handler: {e}")
                 
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
+        @self.app.callback(
+            Output('catalog-list', 'children'),
+            [Input('selected-catalog-store', 'data'),
+             Input('schema-selection-modal', 'is_open')],
+            prevent_initial_call=True
+        )
+        def populate_catalog_list(selected_catalog, is_modal_open):
+            """Populate catalog list when modal opens and update highlighting when selection changes."""
+            if not is_modal_open:
+                return dash.no_update
+            
+            try:
+                # Get available catalogs (only those with writable schemas)
+                catalogs = self._get_unity_catalogs()
+                
+                # Create catalog list UI with proper highlighting
+                catalog_children = []
+                for catalog in catalogs:
+                    # Highlight selected catalog
+                    is_selected = (catalog == selected_catalog)
+                    color = "primary" if is_selected else "light"
+                    outline = not is_selected
+                    
+                    catalog_children.append(
+                        dbc.Button(
+                            catalog,
+                            id={'type': 'catalog-item', 'catalog': catalog},
+                            color=color,
+                            outline=outline,
+                            size="sm",
+                            className="w-100 mb-1 text-start",
+                            style={'border': '1px solid #dee2e6'}
+                        )
+                    )
+                
+                if not catalog_children:
+                    catalog_children = [html.P("Loading catalogs...", className="text-muted text-center mt-5")]
+                
+                return catalog_children
+                
+            except Exception as e:
+                print(f"Error populating catalog list: {e}")
+                return [
+                    dbc.Spinner(
+                        html.P("Loading catalogs...", className="text-muted text-center mt-5"),
+                        color="primary", size="sm"
+                    )
+                ]
+        
         @self.app.callback(
             Output('schema-list', 'children', allow_duplicate=True),
             [Input('selected-catalog-store', 'data'),
