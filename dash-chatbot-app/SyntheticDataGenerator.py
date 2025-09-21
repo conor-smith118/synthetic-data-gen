@@ -1524,13 +1524,12 @@ class SyntheticDataGenerator:
 
         @self.app.callback(
             Output({'type': 'unity-volume-selector', 'index': dash.dependencies.MATCH}, 'children'),
-            [Input({'type': 'pdf-volume', 'index': dash.dependencies.MATCH}, 'value'),
-             Input({'type': 'text-volume', 'index': dash.dependencies.MATCH}, 'value')],
+            Input({'type': 'pdf-volume', 'index': dash.dependencies.MATCH}, 'value'),
             State('operations-store', 'data'),
             prevent_initial_call=True
         )
-        def update_volume_selector(pdf_volume_checkbox, text_volume_checkbox, operations_data):
-            """Update volume selector UI when Write to Volume checkbox changes."""
+        def update_pdf_volume_selector(pdf_volume_checkbox, operations_data):
+            """Update volume selector UI when PDF Write to Volume checkbox changes."""
             try:
                 ctx = dash.callback_context
                 if not ctx.triggered:
@@ -1539,14 +1538,11 @@ class SyntheticDataGenerator:
                 triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
                 op_index = json.loads(triggered_id)['index']
                 
-                # Determine which checkbox triggered and get its value
-                volume_checkbox = pdf_volume_checkbox if 'pdf-volume' in triggered_id else text_volume_checkbox
-                
                 # Find the operation
                 for op in operations_data:
                     if op['id'] == op_index:
                         # Update the write_to_volume config
-                        write_to_volume = 'write_to_volume' in (volume_checkbox or [])
+                        write_to_volume = 'write_to_volume' in (pdf_volume_checkbox or [])
                         op['config']['write_to_volume'] = write_to_volume
                         
                         # Return updated volume selector UI
@@ -1555,7 +1551,39 @@ class SyntheticDataGenerator:
                 return dash.no_update
                 
             except Exception as e:
-                print(f"Error updating volume selector: {e}")
+                print(f"Error updating PDF volume selector: {e}")
+                return dash.no_update
+
+        @self.app.callback(
+            Output({'type': 'unity-volume-selector', 'index': dash.dependencies.MATCH}, 'children', allow_duplicate=True),
+            Input({'type': 'text-volume', 'index': dash.dependencies.MATCH}, 'value'),
+            State('operations-store', 'data'),
+            prevent_initial_call=True
+        )
+        def update_text_volume_selector(text_volume_checkbox, operations_data):
+            """Update volume selector UI when Text Write to Volume checkbox changes."""
+            try:
+                ctx = dash.callback_context
+                if not ctx.triggered:
+                    return dash.no_update
+                
+                triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                op_index = json.loads(triggered_id)['index']
+                
+                # Find the operation
+                for op in operations_data:
+                    if op['id'] == op_index:
+                        # Update the write_to_volume config
+                        write_to_volume = 'write_to_volume' in (text_volume_checkbox or [])
+                        op['config']['write_to_volume'] = write_to_volume
+                        
+                        # Return updated volume selector UI
+                        return self._create_volume_selector_ui(op['config'], op_index)
+                
+                return dash.no_update
+                
+            except Exception as e:
+                print(f"Error updating text volume selector: {e}")
                 return dash.no_update
 
         @self.app.callback(
@@ -2401,13 +2429,35 @@ class SyntheticDataGenerator:
         if op_type == 'pdf':
             config_inputs = [
                 html.Label("Document Name:", className="form-label fw-bold"),
-                dbc.Input(
-                    id={'type': 'pdf-doc-name', 'index': op_id},
-                    placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
-                    value=config.get('doc_name', ''),
-                    debounce=True,
-                    className="mb-3"
-                ),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Input(
+                            id={'type': 'pdf-doc-name', 'index': op_id},
+                            placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
+                            value=config.get('doc_name', ''),
+                            debounce=True
+                        ),
+                    ], width=8),
+                    dbc.Col([
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Checklist(
+                                    options=[{"label": "Write to Volume", "value": "write_to_volume"}],
+                                    value=["write_to_volume"] if config.get('write_to_volume', False) else [],
+                                    id={'type': 'pdf-volume', 'index': op_id},
+                                    className="mt-1"
+                                )
+                            ], width="auto"),
+                            dbc.Col([
+                                html.Div(
+                                    id={'type': 'unity-volume-selector', 'index': op_id},
+                                    children=self._create_volume_selector_ui(config, op_id),
+                                    className="mt-1"
+                                )
+                            ], width=True)
+                        ])
+                    ], width=4)
+                ], className="mb-3"),
                 html.Label("Document Type:", className="form-label fw-bold"),
                 dcc.Dropdown(
                     id={'type': 'pdf-doc-type', 'index': op_id},
@@ -2451,35 +2501,40 @@ class SyntheticDataGenerator:
                     ),
                     html.Small("Generate 3 contextual images based on document content", 
                               className="text-muted d-block")
-                ], className="mb-3"),
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Checklist(
-                            options=[{"label": "Write to Volume", "value": "write_to_volume"}],
-                            value=["write_to_volume"] if config.get('write_to_volume', False) else [],
-                            id={'type': 'pdf-volume', 'index': op_id},
-                            className="mt-1"
-                        )
-                    ], width="auto"),
-                    dbc.Col([
-                        html.Div(
-                            id={'type': 'unity-volume-selector', 'index': op_id},
-                            children=self._create_volume_selector_ui(config, op_id),
-                            className="mt-1"
-                        )
-                    ], width=True)
                 ], className="mb-3")
             ]
         elif op_type == 'text':
             config_inputs = [
                 html.Label("Document Name:", className="form-label fw-bold"),
-                dbc.Input(
-                    id={'type': 'text-doc-name', 'index': op_id},
-                    placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
-                    value=config.get('doc_name', ''),
-                    debounce=True,
-                    className="mb-3"
-                ),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Input(
+                            id={'type': 'text-doc-name', 'index': op_id},
+                            placeholder="Enter document name (e.g., Employee Handbook, Privacy Policy)",
+                            value=config.get('doc_name', ''),
+                            debounce=True
+                        ),
+                    ], width=8),
+                    dbc.Col([
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Checklist(
+                                    options=[{"label": "Write to Volume", "value": "write_to_volume"}],
+                                    value=["write_to_volume"] if config.get('write_to_volume', False) else [],
+                                    id={'type': 'text-volume', 'index': op_id},
+                                    className="mt-1"
+                                )
+                            ], width="auto"),
+                            dbc.Col([
+                                html.Div(
+                                    id={'type': 'unity-volume-selector', 'index': op_id},
+                                    children=self._create_volume_selector_ui(config, op_id),
+                                    className="mt-1"
+                                )
+                            ], width=True)
+                        ])
+                    ], width=4)
+                ], className="mb-3"),
                 html.Label("Document Type:", className="form-label fw-bold"),
                 dcc.Dropdown(
                     id={'type': 'text-doc-type', 'index': op_id},
@@ -2520,24 +2575,7 @@ class SyntheticDataGenerator:
                     value=config.get('count', 1),
                     marks={i: str(i) for i in range(1, 11)},
                     className="mb-3"
-                ),
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Checklist(
-                            options=[{"label": "Write to Volume", "value": "write_to_volume"}],
-                            value=["write_to_volume"] if config.get('write_to_volume', False) else [],
-                            id={'type': 'text-volume', 'index': op_id},
-                            className="mt-1"
-                        )
-                    ], width="auto"),
-                    dbc.Col([
-                        html.Div(
-                            id={'type': 'unity-volume-selector', 'index': op_id},
-                            children=self._create_volume_selector_ui(config, op_id),
-                            className="mt-1"
-                        )
-                    ], width=True)
-                ], className="mb-3")
+                )
             ]
         elif op_type == 'tabular':
             config_inputs = [
