@@ -1523,7 +1523,8 @@ class SyntheticDataGenerator:
                 return dash.no_update
 
         @self.app.callback(
-            Output({'type': 'unity-volume-selector', 'index': dash.dependencies.MATCH}, 'children'),
+            [Output({'type': 'unity-volume-selector', 'index': dash.dependencies.MATCH}, 'children'),
+             Output('operations-store', 'data', allow_duplicate=True)],
             Input({'type': 'pdf-volume', 'index': dash.dependencies.MATCH}, 'value'),
             State('operations-store', 'data'),
             prevent_initial_call=True
@@ -1533,29 +1534,32 @@ class SyntheticDataGenerator:
             try:
                 ctx = dash.callback_context
                 if not ctx.triggered:
-                    return dash.no_update
+                    return dash.no_update, dash.no_update
                 
                 triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
                 op_index = json.loads(triggered_id)['index']
                 
-                # Find the operation
-                for op in operations_data:
+                # Update the operations data
+                updated_operations = operations_data.copy()
+                for op in updated_operations:
                     if op['id'] == op_index:
                         # Update the write_to_volume config
                         write_to_volume = 'write_to_volume' in (pdf_volume_checkbox or [])
                         op['config']['write_to_volume'] = write_to_volume
+                        print(f"🔧 PDF Volume Checkbox: {write_to_volume} for operation {op_index}")
                         
-                        # Return updated volume selector UI
-                        return self._create_volume_selector_ui(op['config'], op_index)
+                        # Return updated volume selector UI and updated operations
+                        return self._create_volume_selector_ui(op['config'], op_index), updated_operations
                 
-                return dash.no_update
+                return dash.no_update, dash.no_update
                 
             except Exception as e:
                 print(f"Error updating PDF volume selector: {e}")
-                return dash.no_update
+                return dash.no_update, dash.no_update
 
         @self.app.callback(
-            Output({'type': 'unity-volume-selector', 'index': dash.dependencies.MATCH}, 'children', allow_duplicate=True),
+            [Output({'type': 'unity-volume-selector', 'index': dash.dependencies.MATCH}, 'children', allow_duplicate=True),
+             Output('operations-store', 'data', allow_duplicate=True)],
             Input({'type': 'text-volume', 'index': dash.dependencies.MATCH}, 'value'),
             State('operations-store', 'data'),
             prevent_initial_call=True
@@ -1565,26 +1569,28 @@ class SyntheticDataGenerator:
             try:
                 ctx = dash.callback_context
                 if not ctx.triggered:
-                    return dash.no_update
+                    return dash.no_update, dash.no_update
                 
                 triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
                 op_index = json.loads(triggered_id)['index']
                 
-                # Find the operation
-                for op in operations_data:
+                # Update the operations data  
+                updated_operations = operations_data.copy()
+                for op in updated_operations:
                     if op['id'] == op_index:
                         # Update the write_to_volume config
                         write_to_volume = 'write_to_volume' in (text_volume_checkbox or [])
                         op['config']['write_to_volume'] = write_to_volume
+                        print(f"🔧 Text Volume Checkbox: {write_to_volume} for operation {op_index}")
                         
-                        # Return updated volume selector UI
-                        return self._create_volume_selector_ui(op['config'], op_index)
+                        # Return updated volume selector UI and updated operations
+                        return self._create_volume_selector_ui(op['config'], op_index), updated_operations
                 
-                return dash.no_update
+                return dash.no_update, dash.no_update
                 
             except Exception as e:
                 print(f"Error updating text volume selector: {e}")
-                return dash.no_update
+                return dash.no_update, dash.no_update
 
         @self.app.callback(
             [Output('schema-selection-modal', 'is_open'),
@@ -2194,6 +2200,9 @@ class SyntheticDataGenerator:
             for op in updated_operations:
                 if op['id'] == active_operation_id:
                     op['config']['unity_catalog_volume'] = full_volume
+                    # Ensure write_to_volume remains True when confirming volume selection
+                    op['config']['write_to_volume'] = True
+                    print(f"✅ Volume selection confirmed: {full_volume} for operation {active_operation_id}")
                     break
             
             return updated_operations
