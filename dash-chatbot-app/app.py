@@ -182,7 +182,9 @@ else:
                                             'height': '300px', 
                                             'overflow-y': 'auto',
                                             'background-color': '#f8f9fa'
-                                        }),
+                                        }, children=[
+                                            html.P("Loading catalogs...", className="text-muted text-center mt-5")
+                                        ]),
                                         color="primary", size="sm"
                                     )
                                 ])

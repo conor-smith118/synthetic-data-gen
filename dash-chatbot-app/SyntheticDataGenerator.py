@@ -1769,16 +1769,45 @@ class SyntheticDataGenerator:
             return dash.no_update
 
     def _get_unity_catalogs(self):
-        """Get list of Unity Catalogs available to the app."""
+        """Get list of Unity Catalogs the app has USE CATALOG permissions on."""
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
             
-            catalogs = list(w.catalogs.list())
-            catalog_names = [cat.name for cat in catalogs if cat.name]
+            # Get all catalogs first
+            all_catalogs = list(w.catalogs.list())
+            accessible_catalogs = []
             
-            print(f"🏛️ Found {len(catalog_names)} Unity Catalogs: {catalog_names}")
-            return sorted(catalog_names)
+            print(f"🔍 Checking permissions for {len(all_catalogs)} catalogs...")
+            
+            for catalog in all_catalogs:
+                if not catalog.name:
+                    continue
+                    
+                try:
+                    # Test permission by trying to list schemas in the catalog
+                    # This will fail if user doesn't have USE CATALOG permission
+                    list(w.schemas.list(catalog_name=catalog.name, max_results=1))
+                    accessible_catalogs.append(catalog.name)
+                    print(f"✅ Access confirmed for catalog: {catalog.name}")
+                    
+                except Exception as perm_error:
+                    # Check if it's a permission error or just empty catalog
+                    error_str = str(perm_error).lower()
+                    if 'permission' in error_str or 'unauthorized' in error_str or 'use catalog' in error_str:
+                        print(f"❌ No USE CATALOG permission for '{catalog.name}': {perm_error}")
+                    else:
+                        # Might be empty catalog or other non-permission error, include it
+                        accessible_catalogs.append(catalog.name)
+                        print(f"⚠️  Catalog '{catalog.name}' accessible (empty or other): {perm_error}")
+                    continue
+            
+            if not accessible_catalogs:
+                print("⚠️  No accessible catalogs found, using default")
+                accessible_catalogs = ['conor_smith']
+            
+            print(f"🏛️ Found {len(accessible_catalogs)} accessible Unity Catalogs: {accessible_catalogs}")
+            return sorted(accessible_catalogs)
             
         except Exception as e:
             print(f"❌ Error fetching Unity Catalogs: {e}")
@@ -1786,16 +1815,46 @@ class SyntheticDataGenerator:
             return ['conor_smith']
 
     def _get_unity_schemas(self, catalog_name):
-        """Get list of schemas in a specific Unity Catalog."""
+        """Get list of schemas in a specific Unity Catalog that the app has permissions on."""
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
             
-            schemas = list(w.schemas.list(catalog_name=catalog_name))
-            schema_names = [schema.name for schema in schemas if schema.name]
+            # Get all schemas in the catalog
+            all_schemas = list(w.schemas.list(catalog_name=catalog_name))
+            accessible_schemas = []
             
-            print(f"🗄️ Found {len(schema_names)} schemas in catalog '{catalog_name}': {schema_names}")
-            return sorted(schema_names)
+            print(f"🔍 Checking permissions for {len(all_schemas)} schemas in catalog '{catalog_name}'...")
+            
+            for schema in all_schemas:
+                if not schema.name:
+                    continue
+                    
+                try:
+                    # Test permission by trying to list tables in the schema
+                    # This will fail if user doesn't have USE SCHEMA permission
+                    full_schema_name = f"{catalog_name}.{schema.name}"
+                    list(w.tables.list(catalog_name=catalog_name, schema_name=schema.name, max_results=1))
+                    accessible_schemas.append(schema.name)
+                    print(f"✅ Access confirmed for schema: {full_schema_name}")
+                    
+                except Exception as perm_error:
+                    # Check if it's a permission error or just empty schema
+                    error_str = str(perm_error).lower()
+                    if 'permission' in error_str or 'unauthorized' in error_str or 'access' in error_str:
+                        print(f"❌ No permission for schema '{catalog_name}.{schema.name}': {perm_error}")
+                    else:
+                        # Might be empty schema or other non-permission error, include it
+                        accessible_schemas.append(schema.name)
+                        print(f"⚠️  Schema '{catalog_name}.{schema.name}' accessible (empty or other): {perm_error}")
+                    continue
+            
+            if not accessible_schemas and catalog_name == 'conor_smith':
+                print("⚠️  No accessible schemas found in conor_smith catalog, using default")
+                accessible_schemas = ['synthetic_data_app']
+            
+            print(f"🗄️ Found {len(accessible_schemas)} accessible schemas in '{catalog_name}': {accessible_schemas}")
+            return sorted(accessible_schemas)
             
         except Exception as e:
             print(f"❌ Error fetching schemas for catalog '{catalog_name}': {e}")
