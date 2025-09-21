@@ -2057,6 +2057,95 @@ class SyntheticDataGenerator:
             return volume_children, selected_schema
 
         @self.app.callback(
+            Output('volume-schema-list', 'children', allow_duplicate=True),
+            [Input('selected-volume-schema-store', 'data'),
+             Input('selected-volume-catalog-store', 'data')],
+            prevent_initial_call=True
+        )
+        def update_volume_schema_highlighting(selected_schema, selected_catalog):
+            """Update schema highlighting when selection changes."""
+            if not selected_catalog:
+                return [html.P("Select a catalog first", className="text-muted text-center mt-5")]
+            
+            try:
+                # Get schemas for the selected catalog
+                schemas = self._get_volume_schemas(selected_catalog)
+                
+                # Create schema list UI with proper highlighting
+                schema_children = []
+                for schema in schemas:
+                    # Highlight selected schema
+                    is_selected = (schema == selected_schema)
+                    color = "primary" if is_selected else "light"
+                    outline = not is_selected
+                    
+                    schema_children.append(
+                        dbc.Button(
+                            schema,
+                            id={'type': 'volume-schema-item', 'catalog': selected_catalog, 'schema': schema},
+                            color=color,
+                            outline=outline,
+                            size="sm",
+                            className="w-100 mb-1 text-start",
+                            style={'border': '1px solid #dee2e6'}
+                        )
+                    )
+                
+                if not schema_children:
+                    schema_children = [html.P("No schemas with WRITE_VOLUME permissions found", className="text-muted text-center mt-5")]
+                
+                return schema_children
+                
+            except Exception as e:
+                print(f"Error updating volume schema highlighting: {e}")
+                return [html.P("Error loading schemas", className="text-muted text-center mt-5")]
+
+        @self.app.callback(
+            Output('volume-list', 'children', allow_duplicate=True),
+            [Input('selected-volume-store', 'data'),
+             Input('selected-volume-catalog-store', 'data'),
+             Input('selected-volume-schema-store', 'data')],
+            prevent_initial_call=True
+        )
+        def update_volume_highlighting(selected_volume, selected_catalog, selected_schema):
+            """Update volume highlighting when selection changes."""
+            if not selected_catalog or not selected_schema:
+                return [html.P("Select a schema first", className="text-muted text-center mt-5")]
+            
+            try:
+                # Get volumes for the selected catalog.schema
+                volumes = self._get_volumes(selected_catalog, selected_schema)
+                
+                # Create volume list UI with proper highlighting
+                volume_children = []
+                for volume in volumes:
+                    # Highlight selected volume
+                    is_selected = (volume == selected_volume)
+                    color = "primary" if is_selected else "light"
+                    outline = not is_selected
+                    
+                    volume_children.append(
+                        dbc.Button(
+                            volume,
+                            id={'type': 'volume-item', 'catalog': selected_catalog, 'schema': selected_schema, 'volume': volume},
+                            color=color,
+                            outline=outline,
+                            size="sm",
+                            className="w-100 mb-1 text-start",
+                            style={'border': '1px solid #dee2e6'}
+                        )
+                    )
+                
+                if not volume_children:
+                    volume_children = [html.P("No volumes with WRITE_VOLUME permissions found", className="text-muted text-center mt-5")]
+                
+                return volume_children
+                
+            except Exception as e:
+                print(f"Error updating volume highlighting: {e}")
+                return [html.P("Error loading volumes", className="text-muted text-center mt-5")]
+
+        @self.app.callback(
             [Output('selected-volume-preview', 'children'),
              Output('volume-modal-confirm', 'disabled'),
              Output('selected-volume-store', 'data', allow_duplicate=True)],
