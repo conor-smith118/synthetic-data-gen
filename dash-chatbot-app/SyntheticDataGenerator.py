@@ -1568,21 +1568,19 @@ class SyntheticDataGenerator:
             return dash.no_update, dash.no_update, dash.no_update
 
         @self.app.callback(
-            [Output('operations-store', 'data', allow_duplicate=True),
-             Output({'type': 'selected-schema-display', 'index': dash.dependencies.MATCH}, 'children')],
+            Output('operations-store', 'data', allow_duplicate=True),
             Input('schema-modal-confirm', 'n_clicks'),
             [State('schema-input', 'value'),
              State('operations-store', 'data'),
              State('active-operation-store', 'data')],
             prevent_initial_call=True
         )
-        def confirm_schema_selection(confirm_clicks, schema_value, operations_data, active_operation_id):
+        def confirm_schema_selection_operations(confirm_clicks, schema_value, operations_data, active_operation_id):
             """Update operation config with selected schema."""
             if not confirm_clicks or not schema_value or not active_operation_id:
-                return dash.no_update, dash.no_update
+                return dash.no_update
             
             updated_operations = operations_data.copy()
-            updated_schema_display = schema_value
             
             # Update only the active operation
             for op in updated_operations:
@@ -1590,7 +1588,28 @@ class SyntheticDataGenerator:
                     op['config']['unity_catalog_schema'] = schema_value
                     break
             
-            return updated_operations, updated_schema_display
+            return updated_operations
+
+        @self.app.callback(
+            Output({'type': 'selected-schema-display', 'index': dash.dependencies.MATCH}, 'children'),
+            Input('operations-store', 'data'),
+            State({'type': 'selected-schema-display', 'index': dash.dependencies.MATCH}, 'id'),
+            prevent_initial_call=True
+        )
+        def update_schema_display(operations_data, display_id):
+            """Update schema display when operations data changes."""
+            if not operations_data or not display_id:
+                return dash.no_update
+            
+            # Get the operation ID from the display component ID
+            op_id = display_id['index']
+            
+            # Find the corresponding operation and return its schema
+            for op in operations_data:
+                if op['id'] == op_id:
+                    return op['config'].get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
+            
+            return dash.no_update
 
     def _create_schema_selector_ui(self, config, op_id):
         """Create schema selector UI for Unity Catalog."""
