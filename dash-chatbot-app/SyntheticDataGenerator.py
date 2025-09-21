@@ -1524,21 +1524,22 @@ class SyntheticDataGenerator:
 
         @self.app.callback(
             [Output('schema-selection-modal', 'is_open'),
-             Output('schema-input', 'value'),
-             Output('active-operation-store', 'data')],
+             Output('catalog-list', 'children'),
+             Output('active-operation-store', 'data'),
+             Output('selected-catalog-store', 'data'),
+             Output('selected-schema-store', 'data')],
             [Input({'type': 'schema-selector-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
              Input('schema-modal-confirm', 'n_clicks'),
              Input('schema-modal-cancel', 'n_clicks')],
             [State('schema-selection-modal', 'is_open'),
-             State('schema-input', 'value'),
              State('operations-store', 'data')],
             prevent_initial_call=True
         )
-        def handle_schema_modal(selector_clicks, confirm_clicks, cancel_clicks, is_open, schema_value, operations_data):
+        def handle_schema_modal(selector_clicks, confirm_clicks, cancel_clicks, is_open, operations_data):
             """Handle schema selection modal open/close."""
             ctx = dash.callback_context
             if not ctx.triggered:
-                return dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
             
             triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
             
@@ -1549,43 +1550,199 @@ class SyntheticDataGenerator:
                     button_info = json.loads(triggered_id)
                     op_index = button_info['index']
                     
+                    current_schema = 'conor_smith.synthetic_data_app'
                     for op in operations_data:
                         if op['id'] == op_index:
                             current_schema = op['config'].get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
-                            return True, current_schema, op_index  # Open modal with current schema and store operation ID
+                            break
                     
-                    return True, 'conor_smith.synthetic_data_app', op_index  # Open modal with default and store operation ID
+                    # Parse current schema to set initial catalog/schema selection
+                    if '.' in current_schema:
+                        current_catalog, current_schema_name = current_schema.split('.', 1)
+                    else:
+                        current_catalog, current_schema_name = 'conor_smith', 'synthetic_data_app'
+                    
+                    # Get available catalogs
+                    catalogs = self._get_unity_catalogs()
+                    
+                    # Create catalog list UI
+                    catalog_children = []
+                    for catalog in catalogs:
+                        # Highlight current catalog
+                        is_current = (catalog == current_catalog)
+                        color = "primary" if is_current else "light"
+                        outline = not is_current
+                        
+                        catalog_children.append(
+                            dbc.Button(
+                                catalog,
+                                id={'type': 'catalog-item', 'catalog': catalog},
+                                color=color,
+                                outline=outline,
+                                size="sm",
+                                className="w-100 mb-1 text-start",
+                                style={'border': '1px solid #dee2e6'}
+                            )
+                        )
+                    
+                    return True, catalog_children, op_index, current_catalog, current_schema_name
                 
                 # Modal buttons
                 elif 'schema-modal-confirm' in triggered_id:
-                    return False, dash.no_update, dash.no_update  # Close modal, keep current value, keep operation ID
+                    return False, dash.no_update, dash.no_update, dash.no_update, dash.no_update  # Close modal
                 elif 'schema-modal-cancel' in triggered_id:
-                    return False, dash.no_update, dash.no_update  # Close modal, keep current value, keep operation ID
+                    return False, dash.no_update, dash.no_update, None, None  # Close modal and clear selection
                     
             except Exception as e:
                 print(f"Error in schema modal handler: {e}")
                 
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        @self.app.callback(
+            Output('schema-list', 'children', allow_duplicate=True),
+            [Input('selected-catalog-store', 'data'),
+             Input('selected-schema-store', 'data')],
+            prevent_initial_call=True
+        )
+        def populate_initial_schema_list(selected_catalog, selected_schema_name):
+            """Populate schema list when modal opens or catalog changes."""
+            if not selected_catalog:
+                return [html.P("Select a catalog first", className="text-muted text-center mt-5")]
+            
+            # Get schemas for the selected catalog
+            schemas = self._get_unity_schemas(selected_catalog)
+            
+            # Create schema list UI
+            schema_children = []
+            for schema in schemas:
+                # Highlight current schema
+                is_current = (schema == selected_schema_name)
+                color = "primary" if is_current else "light"
+                outline = not is_current
+                
+                schema_children.append(
+                    dbc.Button(
+                        schema,
+                        id={'type': 'schema-item', 'schema': schema},
+                        color=color,
+                        outline=outline,
+                        size="sm",
+                        className="w-100 mb-1 text-start",
+                        style={'border': '1px solid #dee2e6'}
+                    )
+                )
+            
+            if not schema_children:
+                schema_children.append(
+                    html.P("No schemas found", className="text-muted text-center mt-5")
+                )
+            
+            return schema_children
+
+        @self.app.callback(
+            [Output('schema-list', 'children'),
+             Output('selected-catalog-store', 'data', allow_duplicate=True)],
+            Input({'type': 'catalog-item', 'catalog': dash.dependencies.ALL}, 'n_clicks'),
+            [State('selected-catalog-store', 'data')],
+            prevent_initial_call=True
+        )
+        def handle_catalog_selection(catalog_clicks, current_catalog):
+            """Handle catalog selection and populate schemas."""
+            ctx = dash.callback_context
+            if not ctx.triggered or not any(catalog_clicks):
+                return dash.no_update, dash.no_update
+            
+            # Find which catalog was clicked
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            catalog_info = json.loads(triggered_id)
+            selected_catalog = catalog_info['catalog']
+            
+            # Get schemas for the selected catalog
+            schemas = self._get_unity_schemas(selected_catalog)
+            
+            # Create schema list UI
+            schema_children = []
+            for schema in schemas:
+                schema_children.append(
+                    dbc.Button(
+                        schema,
+                        id={'type': 'schema-item', 'schema': schema},
+                        color="light",
+                        outline=True,
+                        size="sm",
+                        className="w-100 mb-1 text-start",
+                        style={'border': '1px solid #dee2e6'}
+                    )
+                )
+            
+            if not schema_children:
+                schema_children.append(
+                    html.P("No schemas found", className="text-muted text-center mt-5")
+                )
+            
+            return schema_children, selected_catalog
+
+        @self.app.callback(
+            [Output('selected-schema-preview', 'children'),
+             Output('schema-modal-confirm', 'disabled')],
+            [Input('selected-catalog-store', 'data'),
+             Input('selected-schema-store', 'data')],
+            prevent_initial_call=True
+        )
+        def update_schema_preview(selected_catalog, selected_schema):
+            """Update schema preview and confirm button state."""
+            if not selected_catalog or not selected_schema:
+                return "None", True  # Disable confirm button
+            
+            full_schema = f"{selected_catalog}.{selected_schema}"
+            return full_schema, False  # Enable confirm button
+
+        @self.app.callback(
+            [Output('selected-schema-preview', 'children', allow_duplicate=True),
+             Output('schema-modal-confirm', 'disabled', allow_duplicate=True),
+             Output('selected-schema-store', 'data', allow_duplicate=True)],
+            Input({'type': 'schema-item', 'schema': dash.dependencies.ALL}, 'n_clicks'),
+            [State('selected-catalog-store', 'data'),
+             State('selected-schema-store', 'data')],
+            prevent_initial_call=True
+        )
+        def handle_schema_selection(schema_clicks, selected_catalog, current_schema):
+            """Handle schema selection and update preview."""
+            ctx = dash.callback_context
+            if not ctx.triggered or not any(schema_clicks) or not selected_catalog:
+                return dash.no_update, dash.no_update, dash.no_update
+            
+            # Find which schema was clicked
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            schema_info = json.loads(triggered_id)
+            selected_schema = schema_info['schema']
+            
+            # Create full schema name
+            full_schema = f"{selected_catalog}.{selected_schema}"
+            
+            return full_schema, False, selected_schema  # Enable confirm button
 
         @self.app.callback(
             Output('operations-store', 'data', allow_duplicate=True),
             Input('schema-modal-confirm', 'n_clicks'),
-            [State('schema-input', 'value'),
+            [State('selected-catalog-store', 'data'),
+             State('selected-schema-store', 'data'),
              State('operations-store', 'data'),
              State('active-operation-store', 'data')],
             prevent_initial_call=True
         )
-        def confirm_schema_selection_operations(confirm_clicks, schema_value, operations_data, active_operation_id):
+        def confirm_schema_selection_operations(confirm_clicks, selected_catalog, selected_schema, operations_data, active_operation_id):
             """Update operation config with selected schema."""
-            if not confirm_clicks or not schema_value or not active_operation_id:
+            if not confirm_clicks or not selected_catalog or not selected_schema or not active_operation_id:
                 return dash.no_update
             
             updated_operations = operations_data.copy()
+            full_schema = f"{selected_catalog}.{selected_schema}"
             
             # Update only the active operation
             for op in updated_operations:
                 if op['id'] == active_operation_id:
-                    op['config']['unity_catalog_schema'] = schema_value
+                    op['config']['unity_catalog_schema'] = full_schema
                     break
             
             return updated_operations
@@ -1610,6 +1767,40 @@ class SyntheticDataGenerator:
                     return op['config'].get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
             
             return dash.no_update
+
+    def _get_unity_catalogs(self):
+        """Get list of Unity Catalogs available to the app."""
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            
+            catalogs = list(w.catalogs.list())
+            catalog_names = [cat.name for cat in catalogs if cat.name]
+            
+            print(f"🏛️ Found {len(catalog_names)} Unity Catalogs: {catalog_names}")
+            return sorted(catalog_names)
+            
+        except Exception as e:
+            print(f"❌ Error fetching Unity Catalogs: {e}")
+            # Return default catalog if query fails
+            return ['conor_smith']
+
+    def _get_unity_schemas(self, catalog_name):
+        """Get list of schemas in a specific Unity Catalog."""
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            
+            schemas = list(w.schemas.list(catalog_name=catalog_name))
+            schema_names = [schema.name for schema in schemas if schema.name]
+            
+            print(f"🗄️ Found {len(schema_names)} schemas in catalog '{catalog_name}': {schema_names}")
+            return sorted(schema_names)
+            
+        except Exception as e:
+            print(f"❌ Error fetching schemas for catalog '{catalog_name}': {e}")
+            # Return default schema if query fails
+            return ['synthetic_data_app'] if catalog_name == 'conor_smith' else []
 
     def _create_schema_selector_ui(self, config, op_id):
         """Create schema selector UI for Unity Catalog."""

@@ -163,31 +163,55 @@ else:
                 dcc.Store(id="history-store", data=[]),
                 dcc.Store(id="operations-store", data=[]),
                 dcc.Store(id="active-operation-store", data=None),  # Store for tracking active operation ID
+                dcc.Store(id="selected-catalog-store", data=None),  # Store for selected catalog
+                dcc.Store(id="selected-schema-store", data=None),   # Store for selected schema
                 dcc.Download(id="download-files-component"),
                 
                 # Schema Selection Modal
                 dbc.Modal([
                     dbc.ModalHeader(dbc.ModalTitle("Select Unity Catalog Schema")),
                     dbc.ModalBody([
-                        html.P("Select a Unity Catalog schema for storing your table:", className="mb-3"),
-                        dbc.InputGroup([
-                            dbc.InputGroupText("Schema:"),
-                            dbc.Input(
-                                id="schema-input",
-                                placeholder="catalog.schema (e.g., conor_smith.synthetic_data_app)",
-                                value="conor_smith.synthetic_data_app"
-                            )
+                        html.P("Select a catalog and schema for storing your table:", className="mb-3"),
+                        dbc.Row([
+                            # Left pane - Catalogs
+                            dbc.Col([
+                                html.H6("Catalogs", className="mb-2"),
+                                html.Div([
+                                    dbc.Spinner(
+                                        html.Div(id="catalog-list", className="border p-2", style={
+                                            'height': '300px', 
+                                            'overflow-y': 'auto',
+                                            'background-color': '#f8f9fa'
+                                        }),
+                                        color="primary", size="sm"
+                                    )
+                                ])
+                            ], width=6),
+                            # Right pane - Schemas  
+                            dbc.Col([
+                                html.H6("Schemas", className="mb-2"),
+                                html.Div([
+                                    html.Div(id="schema-list", className="border p-2", style={
+                                        'height': '300px',
+                                        'overflow-y': 'auto', 
+                                        'background-color': '#f8f9fa'
+                                    }, children=[
+                                        html.P("Select a catalog first", className="text-muted text-center mt-5")
+                                    ])
+                                ])
+                            ], width=6)
                         ], className="mb-3"),
-                        html.Small(
-                            "Enter the full schema path in the format 'catalog.schema'",
-                            className="text-muted"
-                        )
+                        html.Hr(),
+                        html.Div([
+                            html.Strong("Selected: "),
+                            html.Span(id="selected-schema-preview", children="None", className="text-primary")
+                        ], className="mb-2")
                     ]),
                     dbc.ModalFooter([
                         dbc.Button("Cancel", id="schema-modal-cancel", color="secondary"),
-                        dbc.Button("Select Schema", id="schema-modal-confirm", color="primary")
+                        dbc.Button("Select Schema", id="schema-modal-confirm", color="primary", disabled=True)
                     ])
-                ], id="schema-selection-modal", is_open=False),
+                ], id="schema-selection-modal", is_open=False, size="lg"),
                 
                 dcc.Interval(
                     id="progress-interval",
