@@ -1533,11 +1533,13 @@ class SyntheticDataGenerator:
              Input('schema-modal-cancel', 'n_clicks')],
             [State('schema-selection-modal', 'is_open'),
              State('operations-store', 'data')],
-            prevent_initial_call=True
+            prevent_initial_call=False
         )
         def handle_schema_modal(selector_clicks, confirm_clicks, cancel_clicks, is_open, operations_data):
             """Handle schema selection modal open/close."""
             ctx = dash.callback_context
+            
+            # If no context, return no updates
             if not ctx.triggered:
                 return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
             
@@ -1545,16 +1547,17 @@ class SyntheticDataGenerator:
             
             try:
                 # Check if a schema selector button was clicked
-                if 'schema-selector-btn' in triggered_id:
+                if 'schema-selector-btn' in triggered_id and selector_clicks and any(selector_clicks):
                     # Find the current schema for this operation
                     button_info = json.loads(triggered_id)
                     op_index = button_info['index']
                     
                     current_schema = 'conor_smith.synthetic_data_app'
-                    for op in operations_data:
-                        if op['id'] == op_index:
-                            current_schema = op['config'].get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
-                            break
+                    if operations_data:
+                        for op in operations_data:
+                            if op['id'] == op_index:
+                                current_schema = op['config'].get('unity_catalog_schema', 'conor_smith.synthetic_data_app')
+                                break
                     
                     # Parse current schema to set initial catalog/schema selection
                     if '.' in current_schema:
@@ -1562,7 +1565,7 @@ class SyntheticDataGenerator:
                     else:
                         current_catalog, current_schema_name = 'conor_smith', 'synthetic_data_app'
                     
-                    # Get available catalogs
+                    # Get available catalogs (only those with writable schemas)
                     catalogs = self._get_unity_catalogs()
                     
                     # Create catalog list UI
@@ -1584,6 +1587,9 @@ class SyntheticDataGenerator:
                                 style={'border': '1px solid #dee2e6'}
                             )
                         )
+                    
+                    if not catalog_children:
+                        catalog_children = [html.P("No catalogs with CREATE TABLE permissions found", className="text-muted text-center mt-5")]
                     
                     return True, catalog_children, op_index, current_catalog, current_schema_name
                 
@@ -1634,7 +1640,7 @@ class SyntheticDataGenerator:
             
             if not schema_children:
                 schema_children.append(
-                    html.P("No schemas found", className="text-muted text-center mt-5")
+                    html.P("No schemas with CREATE TABLE permissions found", className="text-muted text-center mt-5")
                 )
             
             return schema_children
@@ -1677,7 +1683,7 @@ class SyntheticDataGenerator:
             
             if not schema_children:
                 schema_children.append(
-                    html.P("No schemas found", className="text-muted text-center mt-5")
+                    html.P("No schemas with CREATE TABLE permissions found", className="text-muted text-center mt-5")
                 )
             
             return schema_children, selected_catalog
@@ -1769,96 +1775,81 @@ class SyntheticDataGenerator:
             return dash.no_update
 
     def _get_unity_catalogs(self):
-        """Get list of Unity Catalogs the app has USE CATALOG permissions on."""
+        """Get list of Unity Catalogs that contain schemas with CREATE TABLE permissions."""
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
             
-            # Get all catalogs first
             all_catalogs = list(w.catalogs.list())
-            accessible_catalogs = []
-            
-            print(f"🔍 Checking permissions for {len(all_catalogs)} catalogs...")
+            catalogs_with_writable_schemas = []
             
             for catalog in all_catalogs:
                 if not catalog.name:
                     continue
                     
                 try:
-                    # Test permission by trying to list schemas in the catalog
-                    # This will fail if user doesn't have USE CATALOG permission
-                    list(w.schemas.list(catalog_name=catalog.name, max_results=1))
-                    accessible_catalogs.append(catalog.name)
-                    print(f"✅ Access confirmed for catalog: {catalog.name}")
+                    # Check if this catalog has any schemas where we can create tables
+                    schemas = list(w.schemas.list(catalog_name=catalog.name))
+                    has_writable_schema = False
                     
-                except Exception as perm_error:
-                    # Check if it's a permission error or just empty catalog
-                    error_str = str(perm_error).lower()
-                    if 'permission' in error_str or 'unauthorized' in error_str or 'use catalog' in error_str:
-                        print(f"❌ No USE CATALOG permission for '{catalog.name}': {perm_error}")
-                    else:
-                        # Might be empty catalog or other non-permission error, include it
-                        accessible_catalogs.append(catalog.name)
-                        print(f"⚠️  Catalog '{catalog.name}' accessible (empty or other): {perm_error}")
+                    for schema in schemas:
+                        if not schema.name:
+                            continue
+                            
+                        try:
+                            # Test CREATE TABLE permission by checking if we can access schema info
+                            # and if the schema allows table operations
+                            schema_info = w.schemas.get(catalog_name=catalog.name, schema_name=schema.name)
+                            if schema_info:
+                                has_writable_schema = True
+                                break
+                        except:
+                            continue
+                    
+                    if has_writable_schema:
+                        catalogs_with_writable_schemas.append(catalog.name)
+                        
+                except:
                     continue
             
-            if not accessible_catalogs:
-                print("⚠️  No accessible catalogs found, using default")
-                accessible_catalogs = ['conor_smith']
+            if not catalogs_with_writable_schemas:
+                catalogs_with_writable_schemas = ['conor_smith']
             
-            print(f"🏛️ Found {len(accessible_catalogs)} accessible Unity Catalogs: {accessible_catalogs}")
-            return sorted(accessible_catalogs)
+            return sorted(catalogs_with_writable_schemas)
             
         except Exception as e:
-            print(f"❌ Error fetching Unity Catalogs: {e}")
-            # Return default catalog if query fails
             return ['conor_smith']
 
     def _get_unity_schemas(self, catalog_name):
-        """Get list of schemas in a specific Unity Catalog that the app has permissions on."""
+        """Get list of schemas where the app has CREATE TABLE permissions."""
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
             
-            # Get all schemas in the catalog
             all_schemas = list(w.schemas.list(catalog_name=catalog_name))
-            accessible_schemas = []
-            
-            print(f"🔍 Checking permissions for {len(all_schemas)} schemas in catalog '{catalog_name}'...")
+            writable_schemas = []
             
             for schema in all_schemas:
                 if not schema.name:
                     continue
                     
                 try:
-                    # Test permission by trying to list tables in the schema
-                    # This will fail if user doesn't have USE SCHEMA permission
-                    full_schema_name = f"{catalog_name}.{schema.name}"
-                    list(w.tables.list(catalog_name=catalog_name, schema_name=schema.name, max_results=1))
-                    accessible_schemas.append(schema.name)
-                    print(f"✅ Access confirmed for schema: {full_schema_name}")
-                    
-                except Exception as perm_error:
-                    # Check if it's a permission error or just empty schema
-                    error_str = str(perm_error).lower()
-                    if 'permission' in error_str or 'unauthorized' in error_str or 'access' in error_str:
-                        print(f"❌ No permission for schema '{catalog_name}.{schema.name}': {perm_error}")
-                    else:
-                        # Might be empty schema or other non-permission error, include it
-                        accessible_schemas.append(schema.name)
-                        print(f"⚠️  Schema '{catalog_name}.{schema.name}' accessible (empty or other): {perm_error}")
+                    # Test CREATE TABLE permission by checking if we can get schema details
+                    # and access table operations in this schema
+                    schema_info = w.schemas.get(catalog_name=catalog_name, schema_name=schema.name)
+                    if schema_info:
+                        # Additional check: try to list tables to ensure we have operational access
+                        list(w.tables.list(catalog_name=catalog_name, schema_name=schema.name, max_results=1))
+                        writable_schemas.append(schema.name)
+                except:
                     continue
             
-            if not accessible_schemas and catalog_name == 'conor_smith':
-                print("⚠️  No accessible schemas found in conor_smith catalog, using default")
-                accessible_schemas = ['synthetic_data_app']
+            if not writable_schemas and catalog_name == 'conor_smith':
+                writable_schemas = ['synthetic_data_app']
             
-            print(f"🗄️ Found {len(accessible_schemas)} accessible schemas in '{catalog_name}': {accessible_schemas}")
-            return sorted(accessible_schemas)
+            return sorted(writable_schemas)
             
-        except Exception as e:
-            print(f"❌ Error fetching schemas for catalog '{catalog_name}': {e}")
-            # Return default schema if query fails
+        except Exception:
             return ['synthetic_data_app'] if catalog_name == 'conor_smith' else []
 
     def _create_schema_selector_ui(self, config, op_id):

@@ -171,7 +171,7 @@ else:
                 dbc.Modal([
                     dbc.ModalHeader(dbc.ModalTitle("Select Unity Catalog Schema")),
                     dbc.ModalBody([
-                        html.P("Select a catalog and schema for storing your table:", className="mb-3"),
+                        html.P("Select a catalog and schema where you have CREATE TABLE permissions:", className="mb-3"),
                         dbc.Row([
                             # Left pane - Catalogs
                             dbc.Col([
